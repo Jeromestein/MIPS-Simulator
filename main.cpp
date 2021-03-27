@@ -324,8 +324,22 @@ void getInputReady(std::string fMIPSInstruction, std::string fBinaryCode)
     ifs.close();
 }
 
+class latchReg
+{
+private:
+    unsigned long int IR, NPC, A, B, Imm, ALUOutput, cond, LMD;
+
+public:
+    unsigned long int PC, R[32];
+};
+
+latchReg IF_ID, ID_EX, EX_MEM, MEM_WB;
+// 2KB, 2048*8bits
+char IMem[2048], DMem[2048];
+
 int main()
 {
+    // like assembler?
     getInputReady("MIPSInstruction.txt", "BinaryCode.txt");
 
     return 0;
