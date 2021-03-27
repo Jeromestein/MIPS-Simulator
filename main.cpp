@@ -281,38 +281,52 @@ std::string instructionToBinaryCode(std::vector<std::string> instruction)
 
         return op + rs + rt + immediate;
     }
+
+    // default, return error
+    return "instructionToBinaryCodeError";
 }
 
-int main()
+// get MIPS assembly instruction from fMIPSInstruction,
+// convert to binary code,
+// save in fBinaryCode
+void getInputReady(std::string fMIPSInstruction, std::string fBinaryCode)
 {
     std::ifstream ifs;
-    ifs.open("MIPSInstruction.txt", std::ifstream::in);
-
-    std::ofstream ofs("BinaryCode.txt");
-
+    ifs.open(fMIPSInstruction, std::ifstream::in);
+    std::ofstream ofs(fBinaryCode);
     std::string line;
 
     while (getline(ifs, line))
     {
-        std::string str;
-        // format, transfer to lowercase
-        std::transform(line.begin(), line.end(), back_inserter(str), ::tolower);
-        // split the insturction, and ignore the comments
-        std::vector<std::string> instruction = splitInstruction(str);
+        // if it is not an empty line ,
+        // then format the input and convert it to binary code
+        if (line != "")
+        {
+            std::string str;
+            // format, transfer to lowercase
+            std::transform(line.begin(), line.end(), back_inserter(str), ::tolower);
+            // split the insturction, and ignore the comments
+            std::vector<std::string> instruction = splitInstruction(str);
 
-        // for (auto str : instruction)
-        // {
-        //     ofs << str << " ";
-        // }
-        // ofs << std::endl;
+            // for (auto str : instruction)
+            // {
+            //     ofs << str << " ";
+            // }
+            // ofs << std::endl;
 
-        std::string BinaryCode = instructionToBinaryCode(instruction);
-        std::bitset<32> code(BinaryCode);
-        ofs << std::hex << code.to_ulong() << std::endl;
-        //ofs << BinaryCode << std::endl;
+            std::string BinaryCode = instructionToBinaryCode(instruction);
+            std::bitset<32> code(BinaryCode);
+            ofs << std::hex << code.to_ulong() << std::endl;
+            //ofs << BinaryCode << std::endl;
+        }
     }
 
     ifs.close();
+}
+
+int main()
+{
+    getInputReady("MIPSInstruction.txt", "BinaryCode.txt");
 
     return 0;
 }
