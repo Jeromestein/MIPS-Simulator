@@ -764,8 +764,8 @@ int WB_stage()
     return 0;
 }
 
-// Store the BCode from fBinaryCode to IMem
-bool getInstruction(std::string fBinaryCode, std::bitset<8> IMem[])
+// Store the BCode from fBinaryCode to IMem[]
+bool getInstruction(std::string fBinaryCode)
 {
     std::ifstream ifs;
     ifs.open(fBinaryCode, std::ifstream::in);
@@ -791,26 +791,71 @@ bool getInstruction(std::string fBinaryCode, std::bitset<8> IMem[])
 
     return true;
 }
-
-void printAllInstructions(std::bitset<8> IMem[])
+void printAllInstructions(std::string fMIPSInstruction)
 {
-    for (int i = 0; i < instruction_cnt; i++)
+    std::ifstream ifs;
+    ifs.open(fMIPSInstruction, std::ifstream::in);
+    std::string line;
+
+    int i = 0;
+    while (getline(ifs, line))
     {
-        std::cout << i << "\t";
-        std::cout << IMem[instruction_cnt * 4 + 0]
-                  << IMem[instruction_cnt * 4 + 1]
-                  << IMem[instruction_cnt * 4 + 2]
-                  << IMem[instruction_cnt * 4 + 3];
+        // if it is not an empty line ,
+        // then format the input and convert it to binary code
+        if (line != "")
+        {
+            std::string str;
+            // format, transfer to lowercase
+            std::transform(line.begin(), line.end(), back_inserter(str), ::tolower);
+
+            std::cout << i << "\t";
+            std::cout << str;
+
+            if (i == PC)
+                std::cout << "\t<< PC";
+
+            std::cout << std::endl;
+            i++;
+        }
+    }
+
+    ifs.close();
+}
+
+void printIMem()
+{
+    for (int i = 0; i < 2048 / 4; i++)
+    {
+        std::cout << i * 4 << "\t";
+        std::cout << IMem[i * 4 + 0] << " "
+                  << IMem[i * 4 + 1] << " "
+                  << IMem[i * 4 + 2] << " "
+                  << IMem[i * 4 + 3];
 
         if (i == PC)
         {
-            std::cout << "  <<";
+            std::cout << "\t<< PC";
         }
         std::cout << std::endl;
     }
 }
 
-void printAllRegisters(std::bitset<32> Regs[])
+void printDMem()
+{
+    // 2KB = 2048*8bit
+    for (int i = 0; i < 2048 / 4; i++)
+    {
+        std::cout << i * 4 << "\t";
+        std::cout << DMem[i * 4 + 0] << " "
+                  << DMem[i * 4 + 1] << " "
+                  << DMem[i * 4 + 2] << " "
+                  << DMem[i * 4 + 3];
+
+        std::cout << std::endl;
+    }
+}
+
+void printAllRegisters()
 {
     for (int i = 0; i < 32; i++)
     {
@@ -825,21 +870,29 @@ int main()
     {
         std::cout << "getBCode Wrong!" << std::endl;
     }
-    if (!getInstruction("BinaryCode.txt", IMem))
-    {
-        std::cout << "getInstruction Wrong!" << std::endl;
-    }
 
     // initialization
     PC = 0;
     clk_cnt = i_cnt = IF_cnt = ID_cnt = EX_cnt = MEM_cnt = WB_cnt = 0;
+    for (size_t i = 0; i < 2048; i++)
+    {
+        IMem[i].reset();
+        DMem[i].reset();
+    }
+
+    if (!getInstruction("BinaryCode.txt"))
+    {
+        std::cout << "getInstruction Wrong!" << std::endl;
+    }
 
     while (true)
     {
         std::map<std::string, int> cmd = {
             {"exit", -1},
-            {"ins ls all", 1},
-            {"reg stat", 2},
+            {"ins ls all", -11},
+            {"imem stat", 1},
+            {"dmem stat", 2},
+            {"reg stat", 3},
 
         };
         std::string strcmd;
@@ -847,23 +900,32 @@ int main()
         std::cout << "cmd:" << std::endl;
         //std::cin >> strcmd;
         getline(std::cin, strcmd);
-
+        std::cout << "********************************************"
+                  << std::endl;
         switch (cmd[strcmd])
         {
         case -1:
             return 0;
             break;
 
+        case -11:
+            printAllInstructions("MIPSInstruction.txt");
+            break;
+
         case 1:
-            printAllInstructions(IMem);
+            printIMem();
             break;
 
         case 2:
-            printAllRegisters(Regs);
+            printDMem();
+            break;
+
+        case 3:
+            printAllRegisters();
             break;
 
         default:
-            std::cout << "cmd is not valid." << std::endl;
+            std::cout << "This cmd is not valid." << std::endl;
             break;
         }
     }
