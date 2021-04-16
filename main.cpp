@@ -87,6 +87,16 @@ std::map<std::string, std::string> Register32 = {
     {"$fp", "11110"},
     {"$ra", "11111"}};
 
+std::string Register32Name[32] = {
+    "$zero", "$at", "$v0", "$v1",
+    "$a0", "$a1", "$a2", "$a3",
+    "$t0", "$t1", "$t2", "$t3",
+    "$t4", "$t5", "$t6", "$t7",
+    "$s0", "$s1", "$s2", "$s3",
+    "$s4", "$s5", "$s6", "$s7",
+    "$t8", "$t9", "$k0", "$k1",
+    "$gp", "$sp", "$fp", "$ra"};
+
 // transfer assembly insrtuction to binary code
 std::string instructionToBinaryCode(std::vector<std::string> instruction)
 {
@@ -290,7 +300,7 @@ std::string instructionToBinaryCode(std::vector<std::string> instruction)
 // get MIPS assembly instruction from fMIPSInstruction,
 // convert to binary code,
 // save in fBinaryCode
-void getInputReady(std::string fMIPSInstruction, std::string fBinaryCode)
+bool getBCode(std::string fMIPSInstruction, std::string fBinaryCode)
 {
     std::ifstream ifs;
     ifs.open(fMIPSInstruction, std::ifstream::in);
@@ -317,12 +327,16 @@ void getInputReady(std::string fMIPSInstruction, std::string fBinaryCode)
 
             std::string BinaryCode = instructionToBinaryCode(instruction);
             std::bitset<32> code(BinaryCode);
-            ofs << std::hex << code.to_ulong() << std::endl;
-            //ofs << BinaryCode << std::endl;
+            // output hex code in .txt
+            //ofs << std::hex << code.to_ulong() << std::endl;
+            // output binary code in .txt
+            ofs << BinaryCode << std::endl;
         }
     }
 
     ifs.close();
+
+    return true;
 }
 
 class latchReg
@@ -330,11 +344,10 @@ class latchReg
     //private:
 public:
     // 32bits
-    std::bitset<32> IR, ALUOutput, LMD;
+    std::bitset<32> IR, ALUOutput, LMD; // load memory data
     std::bitset<32> A, B, Imm;
     bool cond;
     unsigned long NPC;
-    std::string op;
 
 public:
     unsigned long PC;
@@ -345,6 +358,7 @@ latchReg IF_ID, ID_EX, EX_MEM, MEM_WB;
 std::bitset<8> IMem[2048], DMem[2048];
 std::bitset<32> Regs[32], hi, lo;
 unsigned long PC;
+int instruction_cnt;
 
 // combine 4 bytes, 4*8bits to 1 word, 32bits
 std::bitset<32> byte2word(std::bitset<8> array_byte[], long address)
@@ -369,6 +383,7 @@ std::bitset<8> word2byte(std::bitset<32> word, int i)
     return byte;
 }
 
+// from 2's complement binary code to decimal
 long _2sComplement(std::bitset<32> binary)
 {
     long decimal;
@@ -385,30 +400,28 @@ long _2sComplement(std::bitset<32> binary)
     return decimal;
 }
 
-int main()
+unsigned long long clk_cnt, i_cnt, IF_cnt, ID_cnt, EX_cnt, MEM_cnt, WB_cnt;
+bool isBranch, waitBranch;
+int IF_stage()
 {
-    // like assembler?
-    getInputReady("MIPSInstruction.txt", "BinaryCode.txt");
-
-    // initial
-    PC = 0;
-
-    /*IF stage*/
     IF_ID.IR = byte2word(IMem, PC);
 
-    if ((EX_MEM.op == "branch") && EX_MEM.cond)
+    //if ((EX_MEM.op == "branch") && EX_MEM.cond)
     {
         IF_ID.NPC = EX_MEM.ALUOutput.to_ulong();
         IF_ID.PC = EX_MEM.ALUOutput.to_ulong();
     }
-    else
+    //else
     {
         IF_ID.NPC = PC + 4;
         IF_ID.PC = PC + 4;
     }
+    IF_cnt++;
+    return 0;
+}
 
-    /*ID stage*/
-
+int ID_stage()
+{
     ID_EX.NPC = IF_ID.NPC;
     ID_EX.IR = IF_ID.IR;
 
@@ -422,7 +435,29 @@ int main()
     // 2's complement
     ID_EX.Imm = imm.to_ulong();
 
-    // /*EX stage*/
+    /*data hazard detect*/
+    // Lock the destination register until WB stage.
+    // (different instruction has different destination register, rt, rs or rd)
+    // check if the target or source registers are locked,
+    // if true, wait until it is unlocked.
+
+    /*control hazard detect*/
+    // if the instruction is branch, in this case, beq op : 000100
+    // then set isBranch as true
+    std::string op = ID_EX.IR.to_string().substr(0, 6);
+    if (op == "000100")
+    {
+        isBranch = true;
+        waitBranch = true;
+    }
+
+    ID_cnt++;
+
+    return 0;
+}
+
+int EX_stage()
+{
     EX_MEM.IR = ID_EX.IR;
     std::string op = EX_MEM.IR.to_string().substr(0, 6);
     // ALU instruction
@@ -473,7 +508,7 @@ int main()
             // mul(t)
             std::bitset<64> x(ID_EX.A.to_ullong() * ID_EX.B.to_ullong());
             hi = x.to_ullong() >> 32;
-            lo = x.to_ullong() % (unsigned long long)pow(2, 32);
+            lo = x.to_ullong() % 4294967296; //2^32
         }
         if (func == "000000")
         {
@@ -569,9 +604,11 @@ int main()
         EX_MEM.ALUOutput = ID_EX.NPC + (_2sComplement(ID_EX.Imm) << 2);
         EX_MEM.cond = (ID_EX.A == ID_EX.B);
     }
-
-    // /*MEM stage*/
-
+    EX_cnt++;
+    return 0;
+}
+int MEM_stage()
+{
     MEM_WB.IR = EX_MEM.IR;
     std::string op = MEM_WB.IR.to_string().substr(0, 6);
     //         31..26  25..21  20..16  15..0
@@ -628,8 +665,12 @@ int main()
             DMem[address + 3] = word2byte(EX_MEM.B, 3);
         }
     }
+    MEM_cnt++;
 
-    // /*WB stage*/
+    return 0;
+}
+int WB_stage()
+{
     MEM_WB.IR = EX_MEM.IR;
     std::string op = MEM_WB.IR.to_string().substr(0, 6);
     // ALU instruction
@@ -716,6 +757,141 @@ int main()
         std::bitset<5> rt(IF_ID.IR.to_string(), 20, 5);
         Regs[rt.to_ulong()] = MEM_WB.LMD;
     }
+
+    WB_cnt++;
+    // complete one instruction
+    i_cnt++;
+    return 0;
+}
+
+// Store the BCode from fBinaryCode to IMem
+bool getInstruction(std::string fBinaryCode, std::bitset<8> IMem[])
+{
+    std::ifstream ifs;
+    ifs.open(fBinaryCode, std::ifstream::in);
+    std::string line;
+    instruction_cnt = 0;
+
+    while (getline(ifs, line))
+    {
+        // if it is not an empty line ,
+        // then store input to IMem
+        if (line != "")
+        {
+            std::bitset<32> word(line);
+            IMem[instruction_cnt * 4 + 0] = word2byte(word, 0);
+            IMem[instruction_cnt * 4 + 1] = word2byte(word, 1);
+            IMem[instruction_cnt * 4 + 2] = word2byte(word, 2);
+            IMem[instruction_cnt * 4 + 3] = word2byte(word, 3);
+
+            instruction_cnt++;
+        }
+    }
+    ifs.close();
+
+    return true;
+}
+
+void printAllInstructions(std::bitset<8> IMem[])
+{
+    for (int i = 0; i < instruction_cnt; i++)
+    {
+        std::cout << i << "\t";
+        std::cout << IMem[instruction_cnt * 4 + 0]
+                  << IMem[instruction_cnt * 4 + 1]
+                  << IMem[instruction_cnt * 4 + 2]
+                  << IMem[instruction_cnt * 4 + 3];
+
+        if (i == PC)
+        {
+            std::cout << "  <<";
+        }
+        std::cout << std::endl;
+    }
+}
+
+void printAllRegisters(std::bitset<32> Regs[])
+{
+    for (int i = 0; i < 32; i++)
+    {
+        std::cout << Register32Name[i] << ":\t" << Regs[i] << std::endl;
+    }
+}
+
+int main()
+{
+    // like an assembler?
+    if (!getBCode("MIPSInstruction.txt", "BinaryCode.txt"))
+    {
+        std::cout << "getBCode Wrong!" << std::endl;
+    }
+    if (!getInstruction("BinaryCode.txt", IMem))
+    {
+        std::cout << "getInstruction Wrong!" << std::endl;
+    }
+
+    // initialization
+    PC = 0;
+    clk_cnt = i_cnt = IF_cnt = ID_cnt = EX_cnt = MEM_cnt = WB_cnt = 0;
+
+    while (true)
+    {
+        std::map<std::string, int> cmd = {
+            {"exit", -1},
+            {"ins ls all", 1},
+            {"reg stat", 2},
+
+        };
+        std::string strcmd;
+
+        std::cout << "cmd:" << std::endl;
+        //std::cin >> strcmd;
+        getline(std::cin, strcmd);
+
+        switch (cmd[strcmd])
+        {
+        case -1:
+            return 0;
+            break;
+
+        case 1:
+            printAllInstructions(IMem);
+            break;
+
+        case 2:
+            printAllRegisters(Regs);
+            break;
+
+        default:
+            std::cout << "cmd is not valid." << std::endl;
+            break;
+        }
+    }
+
+    IF_stage();
+    clk_cnt++;
+
+    ID_stage();
+    IF_stage();
+    clk_cnt++;
+
+    EX_stage();
+    ID_stage();
+    IF_stage();
+    clk_cnt++;
+
+    MEM_stage();
+    EX_stage();
+    ID_stage();
+    IF_stage();
+    clk_cnt++;
+
+    WB_stage();
+    MEM_stage();
+    EX_stage();
+    ID_stage();
+    IF_stage();
+    clk_cnt++;
 
     return 0;
 }
