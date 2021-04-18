@@ -386,6 +386,7 @@ std::bitset<8> word2byte(std::bitset<32> word, int i)
 // from 2's complement binary code to decimal
 long _2sComplement(std::bitset<32> binary)
 {
+    // 32 bit signed int
     long decimal;
     if (binary[31] == 1)
     {
@@ -404,18 +405,20 @@ unsigned long long clk_cnt, i_cnt, IF_cnt, ID_cnt, EX_cnt, MEM_cnt, WB_cnt;
 bool isBranch, waitBranch;
 int IF_stage()
 {
+
+    // beq
+    // EX_MEM.op == "000100"
+    if ((EX_MEM.IR.to_string().substr(0, 6) == "000100") && EX_MEM.cond == true)
+    {
+        PC = EX_MEM.ALUOutput.to_ulong();
+    }
+
     IF_ID.IR = byte2word(IMem, PC);
 
-    //if ((EX_MEM.op == "branch") && EX_MEM.cond)
-    {
-        IF_ID.NPC = EX_MEM.ALUOutput.to_ulong();
-        IF_ID.PC = EX_MEM.ALUOutput.to_ulong();
-    }
-    //else
-    {
-        IF_ID.NPC = PC + 4;
-        IF_ID.PC = PC + 4;
-    }
+    PC += 4;
+    IF_ID.NPC = PC;
+    IF_ID.PC = PC;
+
     IF_cnt++;
     return 0;
 }
@@ -424,15 +427,16 @@ int ID_stage()
 {
     ID_EX.NPC = IF_ID.NPC;
     ID_EX.IR = IF_ID.IR;
-
-    std::bitset<5> rs(IF_ID.IR.to_string(), 25, 5);
+    std::string IR_str = IF_ID.IR.to_string();
+    std::bitset<5> rs(IR_str, 6, 5);
     ID_EX.A = Regs[rs.to_ulong()];
 
-    std::bitset<5> rt(IF_ID.IR.to_string(), 20, 5);
+    std::bitset<5> rt(IR_str, 11, 5);
     ID_EX.B = Regs[rt.to_ulong()];
 
-    std::bitset<16> imm(IF_ID.IR.to_string(), 15, 16);
+    std::bitset<16> imm(IR_str, 16, 16);
     // 2's complement
+    // WRONG!!!
     ID_EX.Imm = imm.to_ulong();
 
     /*data hazard detect*/
@@ -486,41 +490,43 @@ int EX_stage()
         if (func == "100000")
         {
             // add
-            EX_MEM.ALUOutput = ID_EX.A.to_ulong() + ID_EX.B.to_ulong();
+            EX_MEM.ALUOutput = _2sComplement(ID_EX.A) + _2sComplement(ID_EX.B);
         }
         if (func == "100010")
         {
             // sub
-            EX_MEM.ALUOutput = ID_EX.A.to_ulong() - ID_EX.B.to_ulong();
+            EX_MEM.ALUOutput = _2sComplement(ID_EX.A) - _2sComplement(ID_EX.B);
         }
         if (func == "100100")
         {
             // and
-            EX_MEM.ALUOutput = ID_EX.A.to_ulong() & ID_EX.B.to_ulong();
+            EX_MEM.ALUOutput = ID_EX.A & ID_EX.B;
         }
         if (func == "100101")
         {
             // or
-            EX_MEM.ALUOutput = ID_EX.A.to_ulong() | ID_EX.B.to_ulong();
+            EX_MEM.ALUOutput = ID_EX.A | ID_EX.B;
         }
         if (func == "011000")
         {
             // mul(t)
-            std::bitset<64> x(ID_EX.A.to_ullong() * ID_EX.B.to_ullong());
+            std::bitset<64> x((long long)_2sComplement(ID_EX.A) * _2sComplement(ID_EX.B));
             hi = x.to_ullong() >> 32;
             lo = x.to_ullong() % 4294967296; //2^32
         }
         if (func == "000000")
         {
             // sll
-            std::bitset<5> shamt(EX_MEM.IR.to_string(), 10, 5);
-            EX_MEM.ALUOutput = ID_EX.B.to_ulong() << shamt.to_ulong();
+            // shamt is unsigned
+            std::bitset<5> shamt(EX_MEM.IR.to_string(), 21, 5);
+            EX_MEM.ALUOutput = _2sComplement(ID_EX.B) << shamt.to_ulong();
         }
         if (func == "000010")
         {
             // srl
-            std::bitset<5> shamt(EX_MEM.IR.to_string(), 10, 5);
-            EX_MEM.ALUOutput = ID_EX.B.to_ulong() >> shamt.to_ulong();
+            // shamt is unsigned
+            std::bitset<5> shamt(EX_MEM.IR.to_string(), 21, 5);
+            EX_MEM.ALUOutput = _2sComplement(ID_EX.B) >> shamt.to_ulong();
         }
     }
     /*
@@ -536,28 +542,28 @@ int EX_stage()
     {
         // addi
         // imm is a signed 16-bit int, 2's complement
-        EX_MEM.ALUOutput = ID_EX.A.to_ulong() + _2sComplement(ID_EX.Imm);
+        EX_MEM.ALUOutput = _2sComplement(ID_EX.A) + _2sComplement(ID_EX.Imm);
     }
     if (op == "001100")
     {
         // andi
-        EX_MEM.ALUOutput = ID_EX.A.to_ulong() & _2sComplement(ID_EX.Imm);
+        EX_MEM.ALUOutput = _2sComplement(ID_EX.A) & _2sComplement(ID_EX.Imm);
     }
     if (op == "001101")
     {
         // ori
-        EX_MEM.ALUOutput = ID_EX.A.to_ulong() | _2sComplement(ID_EX.Imm);
+        EX_MEM.ALUOutput = _2sComplement(ID_EX.A) | _2sComplement(ID_EX.Imm);
     }
     if (op == "001010")
     {
         // slti
-        EX_MEM.ALUOutput = ID_EX.A.to_ulong() < _2sComplement(ID_EX.Imm);
+        EX_MEM.ALUOutput = _2sComplement(ID_EX.A) < _2sComplement(ID_EX.Imm);
     }
     if (op == "001011")
     {
         // sltiu
         // unsigned long
-        EX_MEM.ALUOutput = ID_EX.A.to_ulong() < ID_EX.Imm.to_ulong();
+        EX_MEM.ALUOutput = _2sComplement(ID_EX.A) < ID_EX.Imm.to_ulong();
     }
 
     /*
@@ -568,7 +574,7 @@ int EX_stage()
     lui :   001111  00000   rt      immediate   
     */
     /*
-                31..26  25..21  20..16  15..0
+            31..26  25..21  20..16  15..0
             op      rs      rt      immediate
     beq :   000100  rs      rt      immediate
     */
@@ -579,12 +585,14 @@ int EX_stage()
     if (op == "100011")
     {
         // lw
+        // A is unsigned
         EX_MEM.ALUOutput = ID_EX.A.to_ulong() + _2sComplement(ID_EX.Imm);
         EX_MEM.B = ID_EX.B;
     }
     if (op == "101011")
     {
         // sw
+        // A is unsigned
         EX_MEM.ALUOutput = ID_EX.A.to_ulong() + _2sComplement(ID_EX.Imm);
         EX_MEM.B = ID_EX.B;
     }
@@ -645,11 +653,10 @@ int MEM_stage()
     // //    or
     // DMem[EX_MEM.ALUOutput] = EX_MEM.B;
     if (op == "100011" ||
-        op == "101011" ||
-        op == "001111")
+        op == "101011")
     {
-        // lw or lui
-        if (op == "100011" || op == "001111")
+        // lw
+        if (op == "100011")
         {
             MEM_WB.LMD = byte2word(DMem, EX_MEM.ALUOutput.to_ulong());
         }
@@ -664,8 +671,9 @@ int MEM_stage()
             DMem[address + 2] = word2byte(EX_MEM.B, 2);
             DMem[address + 3] = word2byte(EX_MEM.B, 3);
         }
+
+        MEM_cnt++;
     }
-    MEM_cnt++;
 
     return 0;
 }
@@ -703,7 +711,7 @@ int WB_stage()
             func == "000000" ||
             func == "000010")
         {
-            std::bitset<5> rd(MEM_WB.IR.to_string(), 15, 5);
+            std::bitset<5> rd(MEM_WB.IR.to_string(), 16, 5);
             Regs[rd.to_ulong()] = MEM_WB.ALUOutput;
         }
 
@@ -715,7 +723,7 @@ int WB_stage()
             // meaning that we multiply the contents of $b and $c,
             // the least significant 32 bits of results are placed in register $a
             // and the most significant 32-bits of the result will be stored in register $(a+1)
-            std::bitset<5> rd(MEM_WB.IR.to_string(), 15, 5);
+            std::bitset<5> rd(MEM_WB.IR.to_string(), 16, 5);
             Regs[rd.to_ulong()] = lo;
             Regs[rd.to_ulong() + 1] = hi;
         }
@@ -737,7 +745,7 @@ int WB_stage()
         op == "001010" ||
         op == "001011")
     {
-        std::bitset<5> rt(IF_ID.IR.to_string(), 20, 5);
+        std::bitset<5> rt(IF_ID.IR.to_string(), 11, 5);
         Regs[rt.to_ulong()] = MEM_WB.ALUOutput;
     }
 
@@ -745,17 +753,23 @@ int WB_stage()
     // //For load only:
     // Regs[MEM_WB.IR[rt]] = MEM_WB.LMD;
     /*
-                31..26  25..21  20..16  15..0
+            31..26  25..21  20..16  15..0
             op      rs      rt      immediate
     lw  :   100011  rs      rt      immediate
-    sw  :   101011  rs      rt      immediate
     lui :   001111  00000   rt      immediate   
     */
+    // lw
+    if (op == "100011")
+    {
+        std::bitset<5> rt(MEM_WB.IR.to_string(), 11, 5);
+        Regs[rt.to_ulong()] = MEM_WB.LMD;
+    }
+
     // lui
     if (op == "001111")
     {
-        std::bitset<5> rt(IF_ID.IR.to_string(), 20, 5);
-        Regs[rt.to_ulong()] = MEM_WB.LMD;
+        std::bitset<5> rt(MEM_WB.IR.to_string(), 11, 5);
+        Regs[rt.to_ulong()] = EX_MEM.ALUOutput;
     }
 
     WB_cnt++;
@@ -791,6 +805,7 @@ bool getInstruction(std::string fBinaryCode)
 
     return true;
 }
+
 void printAllInstructions(std::string fMIPSInstruction)
 {
     std::ifstream ifs;
@@ -811,12 +826,18 @@ void printAllInstructions(std::string fMIPSInstruction)
             std::cout << i << "\t";
             std::cout << str;
 
-            if (i == PC)
+            if (i == PC / 4)
                 std::cout << "\t<< PC";
 
             std::cout << std::endl;
             i++;
         }
+    }
+
+    // if PC is
+    if (instruction_cnt < PC / 4)
+    {
+        std::cout << "--------------complete the all-----------------" << std::endl;
     }
 
     ifs.close();
@@ -888,11 +909,15 @@ int main()
     while (true)
     {
         std::map<std::string, int> cmd = {
+            {"rins", -100},
+            {"rclk", -101},
+            {"u", -102},
+            {"time", -103},
             {"exit", -1},
-            {"ins ls all", -11},
-            {"imem stat", 1},
-            {"dmem stat", 2},
-            {"reg stat", 3},
+            {"ins ls", -11},
+            {"imem", 1},
+            {"dmem", 2},
+            {"reg", 3},
 
         };
         std::string strcmd;
@@ -904,6 +929,50 @@ int main()
                   << std::endl;
         switch (cmd[strcmd])
         {
+        case -100:
+            // run instruction one by one
+            int num;
+            std::cout << "run instruction one by one: ";
+            std::cin >> num;
+            getchar(); // eat the Enter Key
+            for (size_t i = 0; i < num; i++)
+            {
+                IF_stage();
+                clk_cnt++;
+                ID_stage();
+                clk_cnt++;
+                EX_stage();
+                clk_cnt++;
+                MEM_stage();
+                clk_cnt++;
+                WB_stage();
+                clk_cnt++;
+            }
+
+            break;
+
+        case -101:
+            // run instruction in clk
+
+            break;
+
+        case -102:
+            // Total time (in CPU cycles)
+            std::cout << "Total time (in CPU cycles): " << clk_cnt << std::endl;
+            // Utilization of each stage.
+            clk_cnt, i_cnt, IF_cnt, ID_cnt, EX_cnt, MEM_cnt, WB_cnt;
+            std::cout << "IF: " << IF_cnt << "\t" << IF_cnt * 100. / clk_cnt << "%" << std::endl;
+            std::cout << "ID: " << ID_cnt << "\t" << ID_cnt * 100. / clk_cnt << "%" << std::endl;
+            std::cout << "EX: " << EX_cnt << "\t" << EX_cnt * 100. / clk_cnt << "%" << std::endl;
+            std::cout << "MEM: " << MEM_cnt << "\t" << MEM_cnt * 100. / clk_cnt << "%" << std::endl;
+            std::cout << "WB: " << WB_cnt << "\t" << WB_cnt * 100. / clk_cnt << "%" << std::endl;
+            break;
+
+        case -103:
+            // Total time (in CPU cycles)
+            std::cout << "Total time (in CPU cycles): " << clk_cnt << std::endl;
+            break;
+
         case -1:
             return 0;
             break;
@@ -930,30 +999,30 @@ int main()
         }
     }
 
-    IF_stage();
-    clk_cnt++;
+    // IF_stage();
+    // clk_cnt++;
 
-    ID_stage();
-    IF_stage();
-    clk_cnt++;
+    // ID_stage();
+    // IF_stage();
+    // clk_cnt++;
 
-    EX_stage();
-    ID_stage();
-    IF_stage();
-    clk_cnt++;
+    // EX_stage();
+    // ID_stage();
+    // IF_stage();
+    // clk_cnt++;
 
-    MEM_stage();
-    EX_stage();
-    ID_stage();
-    IF_stage();
-    clk_cnt++;
+    // MEM_stage();
+    // EX_stage();
+    // ID_stage();
+    // IF_stage();
+    // clk_cnt++;
 
-    WB_stage();
-    MEM_stage();
-    EX_stage();
-    ID_stage();
-    IF_stage();
-    clk_cnt++;
+    // WB_stage();
+    // MEM_stage();
+    // EX_stage();
+    // ID_stage();
+    // IF_stage();
+    // clk_cnt++;
 
     return 0;
 }
