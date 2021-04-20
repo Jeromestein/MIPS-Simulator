@@ -100,27 +100,6 @@ std::string Register32Name[32] = {
 // transfer assembly insrtuction to binary code
 std::string instructionToBinaryCode(std::vector<std::string> instruction)
 {
-    /*
-    Syntax: ArithLog  
-    Encoding: Register  
-    f $d, $s, $t
-    
-            31..26  25..21  20..16  15..11  10..6   5..0
-            op      rs      rt      rd      shamt   func
-    add :   000000  rs      rt      rd      00000   100000
-    sub :   000000  rs      rt      rd      00000   100010 
-    and :   000000  rs      rt      rd      00000   100100
-    or  :   000000  rs      rt      rd      00000   100101
-    mul(t): 000000  rs      rt      rd      00000   011000
-
-    // mul(mult)
-    // mul $a,$b,$c, 
-    // meaning that we multiply the contents of $b and $c, the least significant
-    // 32 bits of results are placed in register $a and the most significant 32-bits of the result will be
-    // stored in register $(a+1).
-
-    */
-
     // ArithLog's name to func
     // add, sub, and, or, mul(mult)
     std::map<std::string, std::string> ArithLog = {
@@ -143,17 +122,6 @@ std::string instructionToBinaryCode(std::vector<std::string> instruction)
 
         return op + rs + rt + rd + shamt + func;
     }
-
-    /*
-    Syntax: Shift  
-    Encoding: Register  
-    f $d, $t, a
-
-            31..26  25..21  20..16  15..11  10..6   5..0
-            op      rs      rt      rd      shamt   func
-    sll :   000000  00000   rt      rd      shamt   000000
-    srl :   000000  00000   rt      rd      shamt   000010 
-    */
 
     // Shift's name to func
     // sll, srl
@@ -179,19 +147,6 @@ std::string instructionToBinaryCode(std::vector<std::string> instruction)
         return op + rs + rt + rd + shamt + func;
     }
 
-    /*
-    Syntax: ArithLogI  
-    Encoding: Immediate  
-    o $t, $s, i
-
-            31..26  25..21  20..16  15..0
-            op      rs      rt      immediate
-    addi:   001000  rs      rt      immediate
-    andi:   001100  rs      rt      immediate
-    ori :   001101  rs      rt      immediate
-    slti:   001010  rs      rt      immediate
-    sltiu:  001011  rs      rt      immediate
-    */
     // ArithLogI's name to op
     // addi, andi, ori, slti, sltiu
     std::map<std::string, std::string> ArithLogI = {
@@ -219,19 +174,6 @@ std::string instructionToBinaryCode(std::vector<std::string> instruction)
 
         return op + rs + rt + immediate;
     }
-
-    /*
-    Syntax: LoadStore  
-    Encoding: Immediate  
-    op $t, i, $s
-    (lui $t, i)
-
-            31..26  25..21  20..16  15..0
-            op      rs      rt      immediate
-    lw  :   100011  rs      rt      immediate
-    sw  :   101011  rs      rt      immediate
-    lui :   001111  00000   rt      immediate    
-    */
 
     // LoadStore's name to op
     // addi, andi, ori, slti, sltiu
@@ -347,10 +289,7 @@ public:
     std::bitset<32> IR, ALUOutput, LMD; // load memory data
     std::bitset<32> A, B, Imm;
     bool cond;
-    unsigned long NPC;
-
-public:
-    unsigned long PC;
+    unsigned long NPC, PC;
 };
 
 latchReg IF_ID, ID_EX, EX_MEM, MEM_WB;
@@ -403,59 +342,239 @@ long _2sComplement(std::bitset<32> binary)
 
 unsigned long long clk_cnt, i_cnt, IF_cnt, ID_cnt, EX_cnt, MEM_cnt, WB_cnt;
 bool isBranch, waitBranch;
+bool isDataHazard, waitDataHazard;
+bool RegsBusy[32];
+bool DMemBusy[2048];
 int IF_stage()
 {
-
-    // beq
-    // EX_MEM.op == "000100"
-    if ((EX_MEM.IR.to_string().substr(0, 6) == "000100") && EX_MEM.cond == true)
+    // if wait branch, then IR all zero
+    if (waitBranch == true)
     {
-        PC = EX_MEM.ALUOutput.to_ulong();
+        // insert NOPs
+        IF_ID.IR = Regs[0];
+        // no PC = ID_EX.NPC; (PC = PC + 4)
+    }
+    else
+    {
+        // beq
+        // EX_MEM.op == "000100"
+        if ((EX_MEM.IR.to_string().substr(0, 6) == "000100") && EX_MEM.cond == true)
+        {
+            PC = EX_MEM.ALUOutput.to_ulong();
+        }
+        else
+        {
+            // if wait data hazard, then PC stay still
+            // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+            wrong !!!;
+            if (waitDataHazard != true)
+                PC = ID_EX.NPC;
+        }
+
+        IF_ID.PC = PC;
+        IF_ID.NPC = PC + 4;
+
+        IF_ID.IR = byte2word(IMem, PC);
+
+        IF_cnt++;
     }
 
-    IF_ID.IR = byte2word(IMem, PC);
-
-    PC += 4;
-    IF_ID.NPC = PC;
-    IF_ID.PC = PC;
-
-    IF_cnt++;
     return 0;
 }
 
 int ID_stage()
 {
-    ID_EX.NPC = IF_ID.NPC;
     ID_EX.IR = IF_ID.IR;
-    std::string IR_str = IF_ID.IR.to_string();
-    std::bitset<5> rs(IR_str, 6, 5);
-    ID_EX.A = Regs[rs.to_ulong()];
 
-    std::bitset<5> rt(IR_str, 11, 5);
-    ID_EX.B = Regs[rt.to_ulong()];
-
-    std::bitset<16> imm(IR_str, 16, 16);
-    // 2's complement
-    // WRONG!!!
-    ID_EX.Imm = imm.to_ulong();
-
-    /*data hazard detect*/
-    // Lock the destination register until WB stage.
-    // (different instruction has different destination register, rt, rs or rd)
-    // check if the target or source registers are locked,
-    // if true, wait until it is unlocked.
-
-    /*control hazard detect*/
-    // if the instruction is branch, in this case, beq op : 000100
-    // then set isBranch as true
-    std::string op = ID_EX.IR.to_string().substr(0, 6);
-    if (op == "000100")
+    // if not NOP
+    if (ID_EX.IR != Regs[0])
     {
-        isBranch = true;
-        waitBranch = true;
-    }
+        std::string IR_str = ID_EX.IR.to_string();
+        std::string op = IR_str.substr(0, 6);
+        std::bitset<5> rs(IR_str, 6, 5);
+        std::bitset<5> rt(IR_str, 11, 5);
+        std::bitset<16> imm(IR_str, 16, 16);
+        std::string func = IR_str.substr(26, 6);
 
-    ID_cnt++;
+        /*data hazard detect - RAW*/
+
+        // data hazard detection !!!
+        // (different instruction has different source and target registers)
+
+        // For add, sub, and, or, mul(t): rs & rt
+        if (op == "000000" && (func == "100000" || func == "100010" ||
+                               func == "100100" || func == "100101" ||
+                               func == "011000"))
+        {
+            if (RegsBusy[rs.to_ulong()] == false && RegsBusy[rt.to_ulong()] == false)
+            {
+                ID_EX.A = Regs[rs.to_ulong()];
+                ID_EX.B = Regs[rt.to_ulong()];
+
+                // 2's complement
+                // WARNING!!!
+                ID_EX.Imm = imm.to_ulong();
+
+                waitDataHazard = false;
+            }
+            else
+            {
+                // tell IF stage to stop fetching
+                waitDataHazard = true;
+            }
+        }
+
+        // For sw, beq: rs & rt
+        if (op == "101011" || op == "000100")
+        {
+            if (RegsBusy[rs.to_ulong()] == false && RegsBusy[rt.to_ulong()] == false)
+            {
+                ID_EX.A = Regs[rs.to_ulong()];
+                ID_EX.B = Regs[rt.to_ulong()];
+
+                // 2's complement
+                // WARNING!!!
+                ID_EX.Imm = imm.to_ulong();
+
+                waitDataHazard = false;
+            }
+            else
+            {
+                // tell IF stage to stop fetching
+                waitDataHazard = true;
+            }
+        }
+
+        // For sll, srl: rt
+        if (op == "000000" && (func == "000000" || func == "000010"))
+        {
+            if (RegsBusy[rt.to_ulong()] == false)
+            {
+                ID_EX.A = Regs[rs.to_ulong()];
+                ID_EX.B = Regs[rt.to_ulong()];
+
+                // 2's complement
+                // WARNING!!!
+                ID_EX.Imm = imm.to_ulong();
+
+                waitDataHazard = false;
+            }
+            else
+            {
+                // tell IF stage to stop fetching
+                waitDataHazard = true;
+            }
+        }
+
+        // For addi, andi, ori, slti, sltiu, lw, sw: rs
+        if (op == "001000" ||
+            op == "001100" ||
+            op == "001101" ||
+            op == "001010" ||
+            op == "001011" ||
+            op == "100011" ||
+            op == "101011")
+        {
+            if (RegsBusy[rs.to_ulong()] == false)
+            {
+                ID_EX.A = Regs[rs.to_ulong()];
+                ID_EX.B = Regs[rt.to_ulong()];
+
+                // 2's complement
+                // WARNING!!!
+                ID_EX.Imm = imm.to_ulong();
+
+                waitDataHazard = false;
+            }
+            else
+            {
+                // tell IF stage to stop fetching
+                waitDataHazard = true;
+            }
+        }
+
+        // For lui: no source or target register
+        if (op == "001111")
+        {
+            ID_EX.A = Regs[rs.to_ulong()];
+            ID_EX.B = Regs[rt.to_ulong()];
+
+            // 2's complement
+            // WARNING!!!
+            ID_EX.Imm = imm.to_ulong();
+        }
+
+        // Set destination or target register as busy
+
+        // Lock the destination register until MEM or WB stage.
+        // (different instruction has different destination or target register)
+        // check if the target or source registers are locked,
+        // if true, wait until it is unlocked.
+        if (op == "000000")
+        {
+            // For add, sub, and, or, sll, srl: rd
+            if (func == "100000" ||
+                func == "100010" ||
+                func == "100100" ||
+                func == "100101" ||
+                func == "000000" ||
+                func == "000010")
+            {
+                std::bitset<5> rd(ID_EX.IR.to_string(), 16, 5);
+                // set rd as busy in RegsBusy table
+                RegsBusy[rd.to_ulong()] = true;
+            }
+
+            // For mul(t): rd and the next register
+            if (func == "011000")
+            {
+                std::bitset<5> rd(ID_EX.IR.to_string(), 16, 5);
+                // set rd and the next register as not busy in RegsBusy table
+                RegsBusy[rd.to_ulong()] = true;
+                RegsBusy[rd.to_ulong() + 1] = true;
+            }
+        }
+
+        // For addi, andi, ori, slti, sltiu, lw, lui: rt
+        if (op == "001000" ||
+            op == "001100" ||
+            op == "001101" ||
+            op == "001010" ||
+            op == "001011" ||
+            op == "100011" ||
+            op == "001111")
+        {
+            std::bitset<5> rt(ID_EX.IR.to_string(), 11, 5);
+            // set rt as busy in RegsBusy table
+            RegsBusy[rt.to_ulong()] = true;
+        }
+        // For beq, sw: no destination or target register(PC), so do nothing
+
+        /*control hazard detect*/
+        // if the instruction is branch, in this case, beq op : 000100
+        // then set waitBranch as true
+        // beq
+        if (op == "000100")
+        {
+            // tell IF stage to stop fetching
+            waitBranch = true;
+        }
+
+        if (waitDataHazard == true)
+        {
+            // if Data Hazard, then wait
+            // insert NOPs
+            // flush the ID_EX latch
+            ID_EX.IR = Regs[0];
+        }
+        else
+        {
+            // if no Data Hazard, then forward PC & NPC
+            ID_EX.PC = IF_ID.PC;
+            ID_EX.NPC = IF_ID.NPC;
+            ID_cnt++;
+        }
+    }
 
     return 0;
 }
@@ -463,17 +582,21 @@ int ID_stage()
 int EX_stage()
 {
     EX_MEM.IR = ID_EX.IR;
-    std::string op = EX_MEM.IR.to_string().substr(0, 6);
-    // ALU instruction
 
-    // EX_MEM.IR = ID_EX.IR;
-    // EX_MEM.ALUOutput = ID_EX.A func ID_EX.B;
-    // // or
-    // EX_MEM.ALUOutput = ID_EX.A op ID_EX.Imm;
-
-    if (op == "000000")
+    // if not NOP
+    if (EX_MEM.IR != Regs[0])
     {
-        /*
+        std::string op = EX_MEM.IR.to_string().substr(0, 6);
+        // ALU instruction
+
+        // EX_MEM.IR = ID_EX.IR;
+        // EX_MEM.ALUOutput = ID_EX.A func ID_EX.B;
+        // // or
+        // EX_MEM.ALUOutput = ID_EX.A op ID_EX.Imm;
+
+        if (op == "000000")
+        {
+            /*
                 31..26  25..21  20..16  15..11  10..6   5..0
                 op      rs      rt      rd      shamt   func
         add :   000000  rs      rt      rd      00000   100000
@@ -486,50 +609,50 @@ int EX_stage()
         sll :   000000  00000   rt      rd      shamt   000000
         srl :   000000  00000   rt      rd      shamt   000010 
         */
-        std::string func = EX_MEM.IR.to_string().substr(26, 6);
-        if (func == "100000")
-        {
-            // add
-            EX_MEM.ALUOutput = _2sComplement(ID_EX.A) + _2sComplement(ID_EX.B);
+            std::string func = EX_MEM.IR.to_string().substr(26, 6);
+            if (func == "100000")
+            {
+                // add
+                EX_MEM.ALUOutput = _2sComplement(ID_EX.A) + _2sComplement(ID_EX.B);
+            }
+            if (func == "100010")
+            {
+                // sub
+                EX_MEM.ALUOutput = _2sComplement(ID_EX.A) - _2sComplement(ID_EX.B);
+            }
+            if (func == "100100")
+            {
+                // and
+                EX_MEM.ALUOutput = ID_EX.A & ID_EX.B;
+            }
+            if (func == "100101")
+            {
+                // or
+                EX_MEM.ALUOutput = ID_EX.A | ID_EX.B;
+            }
+            if (func == "011000")
+            {
+                // mul(t)
+                std::bitset<64> x((long long)_2sComplement(ID_EX.A) * _2sComplement(ID_EX.B));
+                hi = x.to_ullong() >> 32;
+                lo = x.to_ullong() % 4294967296; //2^32
+            }
+            if (func == "000000")
+            {
+                // sll
+                // shamt is unsigned
+                std::bitset<5> shamt(EX_MEM.IR.to_string(), 21, 5);
+                EX_MEM.ALUOutput = _2sComplement(ID_EX.B) << shamt.to_ulong();
+            }
+            if (func == "000010")
+            {
+                // srl
+                // shamt is unsigned
+                std::bitset<5> shamt(EX_MEM.IR.to_string(), 21, 5);
+                EX_MEM.ALUOutput = _2sComplement(ID_EX.B) >> shamt.to_ulong();
+            }
         }
-        if (func == "100010")
-        {
-            // sub
-            EX_MEM.ALUOutput = _2sComplement(ID_EX.A) - _2sComplement(ID_EX.B);
-        }
-        if (func == "100100")
-        {
-            // and
-            EX_MEM.ALUOutput = ID_EX.A & ID_EX.B;
-        }
-        if (func == "100101")
-        {
-            // or
-            EX_MEM.ALUOutput = ID_EX.A | ID_EX.B;
-        }
-        if (func == "011000")
-        {
-            // mul(t)
-            std::bitset<64> x((long long)_2sComplement(ID_EX.A) * _2sComplement(ID_EX.B));
-            hi = x.to_ullong() >> 32;
-            lo = x.to_ullong() % 4294967296; //2^32
-        }
-        if (func == "000000")
-        {
-            // sll
-            // shamt is unsigned
-            std::bitset<5> shamt(EX_MEM.IR.to_string(), 21, 5);
-            EX_MEM.ALUOutput = _2sComplement(ID_EX.B) << shamt.to_ulong();
-        }
-        if (func == "000010")
-        {
-            // srl
-            // shamt is unsigned
-            std::bitset<5> shamt(EX_MEM.IR.to_string(), 21, 5);
-            EX_MEM.ALUOutput = _2sComplement(ID_EX.B) >> shamt.to_ulong();
-        }
-    }
-    /*
+        /*
             31..26  25..21  20..16  15..0
             op      rs      rt      immediate
     addi:   001000  rs      rt      immediate
@@ -538,243 +661,274 @@ int EX_stage()
     slti:   001010  rs      rt      immediate
     sltiu:  001011  rs      rt      immediate
     */
-    if (op == "001000")
-    {
-        // addi
-        // imm is a signed 16-bit int, 2's complement
-        EX_MEM.ALUOutput = _2sComplement(ID_EX.A) + _2sComplement(ID_EX.Imm);
-    }
-    if (op == "001100")
-    {
-        // andi
-        EX_MEM.ALUOutput = _2sComplement(ID_EX.A) & _2sComplement(ID_EX.Imm);
-    }
-    if (op == "001101")
-    {
-        // ori
-        EX_MEM.ALUOutput = _2sComplement(ID_EX.A) | _2sComplement(ID_EX.Imm);
-    }
-    if (op == "001010")
-    {
-        // slti
-        EX_MEM.ALUOutput = _2sComplement(ID_EX.A) < _2sComplement(ID_EX.Imm);
-    }
-    if (op == "001011")
-    {
-        // sltiu
-        // unsigned long
-        EX_MEM.ALUOutput = _2sComplement(ID_EX.A) < ID_EX.Imm.to_ulong();
+        if (op == "001000")
+        {
+            // addi
+            // imm is a signed 16-bit int, 2's complement
+            EX_MEM.ALUOutput = _2sComplement(ID_EX.A) + _2sComplement(ID_EX.Imm);
+        }
+        if (op == "001100")
+        {
+            // andi
+            EX_MEM.ALUOutput = _2sComplement(ID_EX.A) & _2sComplement(ID_EX.Imm);
+        }
+        if (op == "001101")
+        {
+            // ori
+            EX_MEM.ALUOutput = _2sComplement(ID_EX.A) | _2sComplement(ID_EX.Imm);
+        }
+        if (op == "001010")
+        {
+            // slti
+            EX_MEM.ALUOutput = _2sComplement(ID_EX.A) < _2sComplement(ID_EX.Imm);
+        }
+        if (op == "001011")
+        {
+            // sltiu
+            // unsigned long
+            EX_MEM.ALUOutput = _2sComplement(ID_EX.A) < ID_EX.Imm.to_ulong();
+        }
+
+        // //Load or store instruction
+        // EX_MEM.IR = ID_EX.IR;
+        // EX_MEM.ALUOutput = ID_EX.A + ID_EX.Imm;
+        // EX_MEM.B = ID_EX.B; //(for store)
+        if (op == "100011")
+        {
+            // lw
+            // A is unsigned
+            EX_MEM.ALUOutput = ID_EX.A.to_ulong() + _2sComplement(ID_EX.Imm);
+            EX_MEM.B = ID_EX.B;
+        }
+        if (op == "101011")
+        {
+            // sw
+            // A is unsigned
+            EX_MEM.ALUOutput = ID_EX.A.to_ulong() + _2sComplement(ID_EX.Imm);
+            EX_MEM.B = ID_EX.B;
+        }
+        if (op == "001111")
+        {
+            // lui
+            EX_MEM.ALUOutput = ID_EX.Imm << 16;
+            EX_MEM.B = ID_EX.B;
+        }
+        // //Branch instruction
+        // EX_MEM.ALUOutput = ID_EX.NPC + (ID_EX.Imm << 2);
+        // EX_MEM.cond = (ID_EX.A == 0);
+        if (op == "000100")
+        {
+            // beq
+            // if rs==rt, then pc=pc+imm<<2
+            EX_MEM.ALUOutput = ID_EX.NPC + (_2sComplement(ID_EX.Imm) << 2);
+            EX_MEM.cond = (ID_EX.A == ID_EX.B);
+
+            // the next PC is ready
+            // no more wait
+            waitBranch = false;
+
+            // However, to stimulate the real MIPS pipeline, which stalls 2 times
+            // clk      1   2   3   4   5
+            // beq:     IF  ID  EX  MEM WB
+            // NOP          IF  ID  EX  MEM WB
+            // NOP              IF  ID  EX  MEM WB
+            // next ins:            IF  ID  EX  MEM WB
+            // we have to make sure that set waitBranch as false after IF stage
+        }
+        EX_cnt++;
     }
 
-    /*
-                31..26  25..21  20..16  15..0
-            op      rs      rt      immediate
-    lw  :   100011  rs      rt      immediate
-    sw  :   101011  rs      rt      immediate
-    lui :   001111  00000   rt      immediate   
-    */
-    /*
-            31..26  25..21  20..16  15..0
-            op      rs      rt      immediate
-    beq :   000100  rs      rt      immediate
-    */
-    // //Load or store instruction
-    // EX_MEM.IR = ID_EX.IR;
-    // EX_MEM.ALUOutput = ID_EX.A + ID_EX.Imm;
-    // EX_MEM.B = ID_EX.B; //(for store)
-    if (op == "100011")
-    {
-        // lw
-        // A is unsigned
-        EX_MEM.ALUOutput = ID_EX.A.to_ulong() + _2sComplement(ID_EX.Imm);
-        EX_MEM.B = ID_EX.B;
-    }
-    if (op == "101011")
-    {
-        // sw
-        // A is unsigned
-        EX_MEM.ALUOutput = ID_EX.A.to_ulong() + _2sComplement(ID_EX.Imm);
-        EX_MEM.B = ID_EX.B;
-    }
-    if (op == "001111")
-    {
-        // lui
-        EX_MEM.ALUOutput = ID_EX.Imm << 16;
-        EX_MEM.B = ID_EX.B;
-    }
-    // //Branch instruction
-    // EX_MEM.ALUOutput = ID_EX.NPC + (ID_EX.Imm << 2);
-    // EX_MEM.cond = (ID_EX.A == 0);
-    if (op == "000100")
-    {
-        // beq
-        // if rs==rt, then pc=pc+imm<<2
-        EX_MEM.ALUOutput = ID_EX.NPC + (_2sComplement(ID_EX.Imm) << 2);
-        EX_MEM.cond = (ID_EX.A == ID_EX.B);
-    }
-    EX_cnt++;
     return 0;
 }
 int MEM_stage()
 {
     MEM_WB.IR = EX_MEM.IR;
-    std::string op = MEM_WB.IR.to_string().substr(0, 6);
-    //         31..26  25..21  20..16  15..0
-    //         op      rs      rt      immediate
-    // addi:   001000  rs      rt      immediate
-    // andi:   001100  rs      rt      immediate
-    // ori :   001101  rs      rt      immediate
-    // slti:   001010  rs      rt      immediate
-    // sltiu:  001011  rs      rt      immediate
-
-    // ALU instruction
-    // MEM_WB.IR = EX_MEM.IR;
-    // MEM_WB.ALUOutput = EX_MEM.ALUOutput;
-    if (op == "000000" ||
-        op == "001000" ||
-        op == "001100" ||
-        op == "001101" ||
-        op == "001010" ||
-        op == "001011")
+    // if not NOP
+    if (MEM_WB.IR != Regs[0])
     {
-        MEM_WB.ALUOutput = EX_MEM.ALUOutput;
-    }
+        std::string op = MEM_WB.IR.to_string().substr(0, 6);
+        //         31..26  25..21  20..16  15..0
+        //         op      rs      rt      immediate
+        // addi:   001000  rs      rt      immediate
+        // andi:   001100  rs      rt      immediate
+        // ori :   001101  rs      rt      immediate
+        // slti:   001010  rs      rt      immediate
+        // sltiu:  001011  rs      rt      immediate
 
-    /*
+        // ALU instruction
+        // MEM_WB.IR = EX_MEM.IR;
+        // MEM_WB.ALUOutput = EX_MEM.ALUOutput;
+        if (op == "000000" ||
+            op == "001000" ||
+            op == "001100" ||
+            op == "001101" ||
+            op == "001010" ||
+            op == "001011")
+        {
+            MEM_WB.ALUOutput = EX_MEM.ALUOutput;
+        }
+
+        if (op == "000100")
+        {
+            // // beq
+            // // the next PC is ready
+            // // no more wait
+            // waitBranch = false;
+
+            // However, to stimulate the real MIPS pipeline, which stalls 2 times
+            // clk      1   2   3   4   5
+            // beq:     IF  ID  EX  MEM WB
+            // NOP          IF  ID  EX  MEM WB
+            // NOP              IF  ID  EX  MEM WB
+            // next ins:            IF  ID  EX  MEM WB
+            // we have to make sure that set waitBranch as false after IF stage
+        }
+
+        /*
                 31..26  25..21  20..16  15..0
-            op      rs      rt      immediate
-    lw  :   100011  rs      rt      immediate
-    sw  :   101011  rs      rt      immediate
-    lui :   001111  00000   rt      immediate   
-    */
-    // //Load or store instruction
-    // MEM_WB.IR = EX_MEM.IR;
-    // MEM_WB.LMD = DMem[EX_MEM.ALUOutput];
-    // //    or
-    // DMem[EX_MEM.ALUOutput] = EX_MEM.B;
-    if (op == "100011" ||
-        op == "101011")
-    {
-        // lw
-        if (op == "100011")
+                op      rs      rt      immediate
+        lw  :   100011  rs      rt      immediate
+        sw  :   101011  rs      rt      immediate
+        lui :   001111  00000   rt      immediate   
+        */
+        // //Load or store instruction
+        // MEM_WB.IR = EX_MEM.IR;
+        // MEM_WB.LMD = DMem[EX_MEM.ALUOutput];
+        // //    or
+        // DMem[EX_MEM.ALUOutput] = EX_MEM.B;
+        if (op == "100011" ||
+            op == "101011")
         {
-            MEM_WB.LMD = byte2word(DMem, EX_MEM.ALUOutput.to_ulong());
-        }
-        // sw
-        if (op == "101011")
-        {
-            // EX_MEM.ALUOutput is the address of first byte
-            // big endian
-            unsigned long address = EX_MEM.ALUOutput.to_ulong();
-            DMem[address + 0] = word2byte(EX_MEM.B, 0);
-            DMem[address + 1] = word2byte(EX_MEM.B, 1);
-            DMem[address + 2] = word2byte(EX_MEM.B, 2);
-            DMem[address + 3] = word2byte(EX_MEM.B, 3);
-        }
+            // lw
+            if (op == "100011")
+            {
+                MEM_WB.LMD = byte2word(DMem, EX_MEM.ALUOutput.to_ulong());
+            }
+            // sw
+            if (op == "101011")
+            {
+                // EX_MEM.ALUOutput is the address of first byte
+                // big endian
+                unsigned long address = EX_MEM.ALUOutput.to_ulong();
+                DMem[address + 0] = word2byte(EX_MEM.B, 0);
+                DMem[address + 1] = word2byte(EX_MEM.B, 1);
+                DMem[address + 2] = word2byte(EX_MEM.B, 2);
+                DMem[address + 3] = word2byte(EX_MEM.B, 3);
 
-        MEM_cnt++;
+                // set DMem[address], DMem[address+1], DMem[address+2], DMem[address+3]
+                // as not busy in DMemBusy table
+                DMemBusy[address + 0] = false;
+                DMemBusy[address + 1] = false;
+                DMemBusy[address + 2] = false;
+                DMemBusy[address + 3] = false;
+            }
+
+            MEM_cnt++;
+        }
     }
 
     return 0;
 }
 int WB_stage()
 {
-    MEM_WB.IR = EX_MEM.IR;
-    std::string op = MEM_WB.IR.to_string().substr(0, 6);
-    // ALU instruction
-    // Regs[MEM_WB.IR[rd]] = MEM_WB.ALUOutput;
-    //    or
-    // Regs[MEM_WB.IR[rt]] = MEM_WB.ALUOutput;
-
-    /*
-            31..26  25..21  20..16  15..11  10..6   5..0
-            op      rs      rt      rd      shamt   func
-    add :   000000  rs      rt      rd      00000   100000
-    sub :   000000  rs      rt      rd      00000   100010 
-    and :   000000  rs      rt      rd      00000   100100
-    or  :   000000  rs      rt      rd      00000   100101
-
-    mul(t): 000000  rs      rt      rd      00000   011000
-
-    sll :   000000  00000   rt      rd      shamt   000000
-    srl :   000000  00000   rt      rd      shamt   000010 
-    */
-    // Regs[MEM_WB.IR[rd]] = MEM_WB.ALUOutput;
-    if (op == "000000")
+    // if not NOP
+    if (MEM_WB.IR != Regs[0])
     {
-        // add, sub, and, or, sll, srl
-        std::string func = MEM_WB.IR.to_string().substr(26, 6);
-        if (func == "100000" ||
-            func == "100010" ||
-            func == "100100" ||
-            func == "100101" ||
-            func == "000000" ||
-            func == "000010")
+
+        std::string op = MEM_WB.IR.to_string().substr(0, 6);
+        // ALU instruction
+        // Regs[MEM_WB.IR[rd]] = MEM_WB.ALUOutput;
+        //    or
+        // Regs[MEM_WB.IR[rt]] = MEM_WB.ALUOutput;
+
+        // Regs[MEM_WB.IR[rd]] = MEM_WB.ALUOutput;
+        if (op == "000000")
         {
-            std::bitset<5> rd(MEM_WB.IR.to_string(), 16, 5);
-            Regs[rd.to_ulong()] = MEM_WB.ALUOutput;
+            // add, sub, and, or, sll, srl
+            std::string func = MEM_WB.IR.to_string().substr(26, 6);
+            if (func == "100000" ||
+                func == "100010" ||
+                func == "100100" ||
+                func == "100101" ||
+                func == "000000" ||
+                func == "000010")
+            {
+                std::bitset<5> rd(MEM_WB.IR.to_string(), 16, 5);
+                Regs[rd.to_ulong()] = MEM_WB.ALUOutput;
+                // set rd as not busy in RegsBusy table
+                RegsBusy[rd.to_ulong()] = false;
+            }
+
+            // mul(t)
+            if (func == "011000")
+            {
+                // Assume the syntax for mul is mul $a,$b,$c,
+                // meaning that we multiply the contents of $b and $c,
+                // the least significant 32 bits of results are placed in register $a
+                // and the most significant 32-bits of the result will be stored in register $(a+1)
+                std::bitset<5> rd(MEM_WB.IR.to_string(), 16, 5);
+                Regs[rd.to_ulong()] = lo;
+                Regs[rd.to_ulong() + 1] = hi;
+                // set rd and the next register as not busy in RegsBusy table
+                RegsBusy[rd.to_ulong()] = false;
+                RegsBusy[rd.to_ulong() + 1] = false;
+            }
+        }
+        /*
+                31..26  25..21  20..16  15..0
+                op      rs      rt      immediate
+        addi:   001000  rs      rt      immediate
+        andi:   001100  rs      rt      immediate
+        ori :   001101  rs      rt      immediate
+        slti:   001010  rs      rt      immediate
+        sltiu:  001011  rs      rt      immediate
+        */
+        // Regs[MEM_WB.IR[rt]] = MEM_WB.ALUOutput;
+        // addi, andi, ori, slti, sltiu
+        if (op == "001000" ||
+            op == "001100" ||
+            op == "001101" ||
+            op == "001010" ||
+            op == "001011")
+        {
+            std::bitset<5> rt(IF_ID.IR.to_string(), 11, 5);
+            Regs[rt.to_ulong()] = MEM_WB.ALUOutput;
+            // set rt as not busy in RegsBusy table
+            RegsBusy[rt.to_ulong()] = false;
         }
 
-        // mul(t)
-        if (func == "011000")
+        // Load or store instruction
+        // //For load only:
+        // Regs[MEM_WB.IR[rt]] = MEM_WB.LMD;
+        /*
+                31..26  25..21  20..16  15..0
+                op      rs      rt      immediate
+        lw  :   100011  rs      rt      immediate
+        lui :   001111  00000   rt      immediate   
+        */
+        // lw
+        if (op == "100011")
         {
-
-            // Assume the syntax for mul is mul $a,$b,$c,
-            // meaning that we multiply the contents of $b and $c,
-            // the least significant 32 bits of results are placed in register $a
-            // and the most significant 32-bits of the result will be stored in register $(a+1)
-            std::bitset<5> rd(MEM_WB.IR.to_string(), 16, 5);
-            Regs[rd.to_ulong()] = lo;
-            Regs[rd.to_ulong() + 1] = hi;
+            std::bitset<5> rt(MEM_WB.IR.to_string(), 11, 5);
+            Regs[rt.to_ulong()] = MEM_WB.LMD;
+            // set rt as not busy in RegsBusy table
+            RegsBusy[rt.to_ulong()] = false;
         }
-    }
-    /*
-            31..26  25..21  20..16  15..0
-            op      rs      rt      immediate
-    addi:   001000  rs      rt      immediate
-    andi:   001100  rs      rt      immediate
-    ori :   001101  rs      rt      immediate
-    slti:   001010  rs      rt      immediate
-    sltiu:  001011  rs      rt      immediate
-    */
-    // Regs[MEM_WB.IR[rt]] = MEM_WB.ALUOutput;
-    // addi, andi, ori, slti, sltiu
-    if (op == "001000" ||
-        op == "001100" ||
-        op == "001101" ||
-        op == "001010" ||
-        op == "001011")
-    {
-        std::bitset<5> rt(IF_ID.IR.to_string(), 11, 5);
-        Regs[rt.to_ulong()] = MEM_WB.ALUOutput;
+
+        // lui
+        if (op == "001111")
+        {
+            std::bitset<5> rt(MEM_WB.IR.to_string(), 11, 5);
+            Regs[rt.to_ulong()] = EX_MEM.ALUOutput;
+            // set rt as not busy in RegsBusy table
+            RegsBusy[rt.to_ulong()] = false;
+        }
+
+        WB_cnt++;
+        // complete one instruction
+        i_cnt++;
     }
 
-    // Load or store instruction
-    // //For load only:
-    // Regs[MEM_WB.IR[rt]] = MEM_WB.LMD;
-    /*
-            31..26  25..21  20..16  15..0
-            op      rs      rt      immediate
-    lw  :   100011  rs      rt      immediate
-    lui :   001111  00000   rt      immediate   
-    */
-    // lw
-    if (op == "100011")
-    {
-        std::bitset<5> rt(MEM_WB.IR.to_string(), 11, 5);
-        Regs[rt.to_ulong()] = MEM_WB.LMD;
-    }
-
-    // lui
-    if (op == "001111")
-    {
-        std::bitset<5> rt(MEM_WB.IR.to_string(), 11, 5);
-        Regs[rt.to_ulong()] = EX_MEM.ALUOutput;
-    }
-
-    WB_cnt++;
-    // complete one instruction
-    i_cnt++;
     return 0;
 }
 
@@ -826,8 +980,8 @@ void printAllInstructions(std::string fMIPSInstruction)
             std::cout << i << "\t";
             std::cout << str;
 
-            if (i == PC / 4)
-                std::cout << "\t<< PC";
+            if (i == IF_ID.NPC / 4)
+                std::cout << "\t<< NPC";
 
             std::cout << std::endl;
             i++;
@@ -835,7 +989,7 @@ void printAllInstructions(std::string fMIPSInstruction)
     }
 
     // if PC is
-    if (instruction_cnt < PC / 4)
+    if (instruction_cnt <= IF_ID.NPC / 4)
     {
         std::cout << "--------------complete the all-----------------" << std::endl;
     }
@@ -910,7 +1064,7 @@ int main()
     {
         std::map<std::string, int> cmd = {
             {"rins", -100},
-            {"rclk", -101},
+            {"rpipe", -101},
             {"u", -102},
             {"time", -103},
             {"exit", -1},
@@ -931,14 +1085,14 @@ int main()
         {
         case -100:
             // run instruction one by one
-            int num;
+            int ins_num;
             std::cout << "run instruction one by one: ";
-            std::cin >> num;
-            getchar(); // eat the Enter Key
-            for (size_t i = 0; i < num; i++)
+            std::cin >> ins_num; // input the number of instructions you wanna run
+            getchar();           // eat the Enter Key
+            for (size_t i = 0; i < ins_num; i++)
             {
                 IF_stage();
-                clk_cnt++;
+                clk_cnt++; // each stage takes one clk cycle
                 ID_stage();
                 clk_cnt++;
                 EX_stage();
@@ -953,7 +1107,20 @@ int main()
 
         case -101:
             // run instruction in clk
-
+            int clk_num;
+            std::cout << "run in clock cycles : ";
+            std::cin >> clk_num; // input the number of clk cycles you wanna run
+            getchar();           // eat the Enter Key
+            for (size_t i = 0; i < clk_num; i++)
+            {
+                WB_stage();
+                MEM_stage();
+                EX_stage();
+                ID_stage();
+                IF_stage();
+                // all 5 stages take only one clk cycle
+                clk_cnt++;
+            }
             break;
 
         case -102:
@@ -998,31 +1165,6 @@ int main()
             break;
         }
     }
-
-    // IF_stage();
-    // clk_cnt++;
-
-    // ID_stage();
-    // IF_stage();
-    // clk_cnt++;
-
-    // EX_stage();
-    // ID_stage();
-    // IF_stage();
-    // clk_cnt++;
-
-    // MEM_stage();
-    // EX_stage();
-    // ID_stage();
-    // IF_stage();
-    // clk_cnt++;
-
-    // WB_stage();
-    // MEM_stage();
-    // EX_stage();
-    // ID_stage();
-    // IF_stage();
-    // clk_cnt++;
 
     return 0;
 }
