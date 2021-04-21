@@ -1090,7 +1090,7 @@ void printAllInstructions(std::string fMIPSInstruction)
 
 // initial all the registers, latches, DMem
 // and load instructions to IMem
-void init(std::string fBinaryCode)
+bool init(std::string fBinaryCode)
 {
     // reset IF_ID
     IF_ID.IR.reset();
@@ -1136,6 +1136,8 @@ void init(std::string fBinaryCode)
     {
         std::cout << "getInstruction Wrong!" << std::endl;
     }
+
+    return true;
 }
 
 // Sequence Diagram of pipeline
@@ -1286,11 +1288,32 @@ void runIns()
     }
 }
 
-void runPipe()
+void runPipe_ins()
 {
-    // run instruction in clk
+    // run instruction one by one(pipeline)
+    int ins_num;
+    std::cout << "run instruction one by one: ";
+    std::cin >> ins_num; // input the number of clk cycles you wanna run
+    getchar();           // eat the Enter Key
+    for (int i = ins_cnt; ins_cnt < i + ins_num;)
+    {
+        std::cout << "clk_num:" << clk_cnt + 1 << std::endl;
+        WB_stage();
+        MEM_stage();
+        EX_stage();
+        ID_stage();
+        IF_stage();
+        std::cout << "Run " << ins_cnt << "/" << instruction_cnt << " instruction." << std::endl;
+        // all 5 stages take only one clk cycle
+        clk_cnt++;
+    }
+}
+
+void runPipe_clk()
+{
+    // run instruction in clk(pipeline)
     int clk_num;
-    std::cout << "run in clock cycles : ";
+    std::cout << "run in clock cycles: ";
     std::cin >> clk_num; // input the number of clk cycles you wanna run
     getchar();           // eat the Enter Key
     for (size_t i = 0; i < clk_num; i++)
@@ -1342,13 +1365,11 @@ void printUtilizationPipe()
 
 int main()
 {
-    // like an assembler?
     if (!getBCode("MIPSInstruction.txt", "BinaryCode.txt"))
     {
         std::cout << "getBCode Wrong!" << std::endl;
     }
 
-    // initialization
     init("BinaryCode.txt");
 
     while (true)
@@ -1362,7 +1383,8 @@ int main()
             {"upipe", -31},
             {"time", -20},
             {"rins", -10},
-            {"rpipe", -11},
+            {"rpins", -11},
+            {"rpclk", -11},
             {"imem", 1},
             {"dmem", 2},
             {"reg", 3},
@@ -1383,8 +1405,8 @@ int main()
             return 0;
             break;
         case -999:
-            init("BinaryCode.txt");
-            std::cout << "initialization" << std::endl;
+            if (init("BinaryCode.txt") == true)
+                std::cout << "Initialize successfully" << std::endl;
             break;
         case -30:
             printUtilizationIns();
@@ -1399,7 +1421,10 @@ int main()
             runIns();
             break;
         case -11:
-            runPipe();
+            runPipe_ins();
+            break;
+        case -12:
+            runPipe_clk();
             break;
         case 1:
             printIMem();
