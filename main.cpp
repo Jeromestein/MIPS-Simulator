@@ -239,7 +239,7 @@ std::string instructionToBinaryCode(std::vector<std::string> instruction)
     return "instructionToBinaryCodeError";
 }
 
-// get MIPS assembly instruction from fMIPSInstruction,
+// get MIPS assembly instructions from fMIPSInstruction,
 // convert to binary code,
 // save in fBinaryCode
 bool getBCode(std::string fMIPSInstruction, std::string fBinaryCode)
@@ -293,7 +293,7 @@ public:
 };
 
 /*
-Latches in each register
+Latches in each register:
     IF/ID: IR, PC, NPC
     ID/EX: IR, PC, NPC, A, B , Imm
     EX/MEM: IR, B, ALUOutput , cond
@@ -348,7 +348,12 @@ long _2sComplement(std::bitset<32> binary)
 }
 
 int instruction_cnt;
-int clk_cnt, i_cnt, IF_cnt, ID_cnt, EX_cnt, MEM_cnt, WB_cnt;
+int clk_cnt, ins_cnt, IF_cnt, ID_cnt, EX_cnt, MEM_cnt, WB_cnt;
+int ins_start[2048], ins_end[2048];
+std::bitset<1> IF_waitBranch[2048], ID_waitRegs[2048];
+// 1: waitBranch
+// 2: waitRegs
+int ins_waitType[2048];
 bool isBranch, waitBranch;
 bool isDataHazard, waitDataHazard;
 
@@ -362,8 +367,9 @@ int IF_stage()
     if (waitBranch == true)
     {
         // insert NOPs
-        IF_ID.IR = Regs[0];
         // no PC = ID_EX.NPC; (PC = PC + 4)
+        IF_ID.IR = Regs[0];
+        IF_waitBranch[clk_cnt + 1] = true;
     }
     // if wait data hazard, then PC stay still (not usefull work)
     else if (waitRegs.any() == true)
@@ -600,6 +606,8 @@ int ID_stage()
             // insert NOPs
             // flush the ID_EX latch
             ID_EX.IR = Regs[0];
+
+            ID_waitRegs[clk_cnt + 1] = true;
         }
         else
         {
@@ -861,46 +869,6 @@ int MEM_stage()
     return 0;
 }
 
-// initial all the registers and latches
-void init()
-{
-    // reset IF_ID
-    IF_ID.IR.reset();
-    IF_ID.PC = 0;
-    IF_ID.NPC = 0;
-    // reset ID_EX
-    ID_EX.IR.reset();
-    ID_EX.PC = 0;
-    ID_EX.NPC = 0;
-    ID_EX.A.reset();
-    ID_EX.B.reset();
-    ID_EX.Imm.reset();
-    // reset EX_MEM
-    EX_MEM.IR.reset();
-    EX_MEM.B.reset();
-    EX_MEM.ALUOutput.reset();
-    EX_MEM.cond = false;
-    // reset MEM_WB
-    MEM_WB.IR.reset();
-    MEM_WB.ALUOutput.reset();
-    MEM_WB.LMD.reset();
-    // reset counters
-    clk_cnt = i_cnt = IF_cnt = ID_cnt = EX_cnt = MEM_cnt = WB_cnt = 0;
-    // reset IMem, DMem, hi, lo, Regs, PC
-    for (size_t i = 0; i < 2048; i++)
-    {
-        IMem[i].reset();
-        DMem[i].reset();
-    }
-    hi.reset();
-    lo.reset();
-    for (size_t i = 0; i < 32; i++)
-    {
-        Regs[i].reset();
-    }
-    PC = 0;
-}
-
 int WB_stage()
 {
     // if not NOP
@@ -1030,8 +998,25 @@ int WB_stage()
         }
 
         WB_cnt++;
+
         // complete one instruction
-        i_cnt++;
+        ins_cnt++;
+        // get the end and start time
+        ins_end[ins_cnt] = clk_cnt + 1;
+        if (ins_cnt == 1)
+            ins_start[ins_cnt] = 1;
+        else
+            ins_start[ins_cnt] = ins_end[ins_cnt - 1] - 3;
+
+        // get wait type
+        if (ins_end[ins_cnt] - ins_start[ins_cnt] > 4)
+        {
+            if (IF_waitBranch[ins_start[ins_cnt]] == true)
+                ins_waitType[ins_cnt] = 1;
+            else if (ID_waitRegs[ins_start[ins_cnt] + 1] == true)
+                ins_waitType[ins_cnt] = 2;
+        }
+
         std::cout << MEM_WB.IR << " is finished." << std::endl;
     }
 
@@ -1103,6 +1088,106 @@ void printAllInstructions(std::string fMIPSInstruction)
     ifs.close();
 }
 
+// initial all the registers, latches, DMem
+// and load instructions to IMem
+void init(std::string fBinaryCode)
+{
+    // reset IF_ID
+    IF_ID.IR.reset();
+    IF_ID.PC = 0;
+    IF_ID.NPC = 0;
+    // reset ID_EX
+    ID_EX.IR.reset();
+    ID_EX.PC = 0;
+    ID_EX.NPC = 0;
+    ID_EX.A.reset();
+    ID_EX.B.reset();
+    ID_EX.Imm.reset();
+    // reset EX_MEM
+    EX_MEM.IR.reset();
+    EX_MEM.B.reset();
+    EX_MEM.ALUOutput.reset();
+    EX_MEM.cond = false;
+    // reset MEM_WB
+    MEM_WB.IR.reset();
+    MEM_WB.ALUOutput.reset();
+    MEM_WB.LMD.reset();
+    // reset counters
+    clk_cnt = ins_cnt = IF_cnt = ID_cnt = EX_cnt = MEM_cnt = WB_cnt = 0;
+    // reset IMem, DMem, hi, lo, Regs, PC
+    for (size_t i = 0; i < 2048; i++)
+    {
+        IMem[i].reset();
+        DMem[i].reset();
+        // clear wait record
+        IF_waitBranch[i].reset();
+        ID_waitRegs[i].reset();
+    }
+    hi.reset();
+    lo.reset();
+    for (size_t i = 0; i < 32; i++)
+    {
+        Regs[i].reset();
+    }
+    PC = 0;
+
+    // load the instructions
+    if (!getInstruction(fBinaryCode))
+    {
+        std::cout << "getInstruction Wrong!" << std::endl;
+    }
+}
+
+// Sequence Diagram of pipeline
+void printPipeSequenceDiagram()
+{
+    // std::cout << "  ";
+    // for (size_t i = 1; i <= clk_cnt; i++)
+    // {
+    //     std::cout << i << " ";
+    // }
+    // std::cout << std::endl;
+    std::cout << "Sequence Diagram of pipeline:" << std::endl;
+    for (size_t i = 1; i <= ins_cnt; i++)
+    {
+        std::cout << i << " ";
+        for (size_t j = 1; j < ins_start[i]; j++)
+        {
+            std::cout << "  ";
+        }
+
+        // waitBranch
+        if (ins_waitType[i] == 1)
+        {
+            std::cout << "F ";
+            for (size_t j = 0; j < ins_end[i] - ins_start[i] - 4; j++)
+            {
+                std::cout << "- ";
+            }
+            std::cout << "D "
+                      << "E "
+                      << "M "
+                      << "W " << std::endl;
+        }
+        // waitRegs
+        else if (ins_waitType[i] == 2)
+        {
+            std::cout << "F D ";
+            for (size_t j = 0; j < ins_end[i] - ins_start[i] - 4; j++)
+            {
+                std::cout << "- ";
+            }
+            std::cout << "E "
+                      << "M "
+                      << "W " << std::endl;
+        }
+        else
+        {
+            std::cout << "F D E M W" << std::endl;
+        }
+    }
+}
+
 void printIMem()
 {
     for (int i = 0; i < 2048 / 4; i++)
@@ -1144,6 +1229,41 @@ void printAllRegisters()
     }
 }
 
+void printAllLatch()
+{
+    /*
+                Latches in each register:
+                    IF/ID: IR, PC, NPC
+                    ID/EX: IR, PC, NPC, A, B , Imm
+                    EX/MEM: IR, B, ALUOutput , cond
+                    MEM/WB: IR, ALUOutput, LMD
+                */
+    std::cout << "Latches in each register:" << std::endl;
+    std::cout << "\tIF/ID: " << std::endl;
+    std::cout << "\t\tIR: " << IF_ID.IR << std::endl;
+    std::cout << "\t\tPC: " << IF_ID.PC << std::endl;
+    std::cout << "\t\tNPC: " << IF_ID.NPC << std::endl;
+
+    std::cout << "\tID/EX: " << std::endl;
+    std::cout << "\t\tIR: " << ID_EX.IR << std::endl;
+    std::cout << "\t\tPC: " << ID_EX.PC << std::endl;
+    std::cout << "\t\tNPC: " << ID_EX.NPC << std::endl;
+    std::cout << "\t\tA: " << ID_EX.A << std::endl;
+    std::cout << "\t\tB: " << ID_EX.B << std::endl;
+    std::cout << "\t\tImm: " << ID_EX.Imm << std::endl;
+
+    std::cout << "\tEX/MEM: " << std::endl;
+    std::cout << "\t\tIR: " << EX_MEM.IR << std::endl;
+    std::cout << "\t\tB: " << EX_MEM.B << std::endl;
+    std::cout << "\t\tALUOutput: " << EX_MEM.ALUOutput << std::endl;
+    std::cout << "\t\tcond: " << EX_MEM.cond << std::endl;
+
+    std::cout << "\tMEM/WB: " << std::endl;
+    std::cout << "\t\tIR: " << MEM_WB.IR << std::endl;
+    std::cout << "\t\tALUOutput: " << MEM_WB.ALUOutput << std::endl;
+    std::cout << "\t\tLMD: " << MEM_WB.LMD << std::endl;
+}
+
 void runIns()
 {
     // run instruction one by one
@@ -1181,7 +1301,7 @@ void runPipe()
         EX_stage();
         ID_stage();
         IF_stage();
-        std::cout << "Run " << i_cnt << "/" << instruction_cnt << " instruction." << std::endl;
+        std::cout << "Run " << ins_cnt << "/" << instruction_cnt << " instruction." << std::endl;
         // all 5 stages take only one clk cycle
         clk_cnt++;
     }
@@ -1191,7 +1311,7 @@ void printTime()
 {
     // Total time (in CPU cycles)
     std::cout << "Total time (in CPU cycles): " << clk_cnt << std::endl;
-    std::cout << "Run " << i_cnt << "/" << instruction_cnt << "instruction." << std::endl;
+    std::cout << "Run " << ins_cnt << "/" << instruction_cnt << "instruction." << std::endl;
 }
 
 void printUtilizationIns()
@@ -1199,7 +1319,7 @@ void printUtilizationIns()
     // utilization in regular mode
     printTime();
     // Utilization of each stage.
-    clk_cnt, i_cnt, IF_cnt, ID_cnt, EX_cnt, MEM_cnt, WB_cnt;
+    clk_cnt, ins_cnt, IF_cnt, ID_cnt, EX_cnt, MEM_cnt, WB_cnt;
     std::cout << "IF: " << IF_cnt << "\t" << IF_cnt * 100. / clk_cnt << "%" << std::endl;
     std::cout << "ID: " << ID_cnt << "\t" << ID_cnt * 100. / clk_cnt << "%" << std::endl;
     std::cout << "EX: " << EX_cnt << "\t" << EX_cnt * 100. / clk_cnt << "%" << std::endl;
@@ -1212,7 +1332,7 @@ void printUtilizationPipe()
     // utilization in pipeline mode
     printTime();
     // Utilization of each stage.
-    clk_cnt, i_cnt, IF_cnt, ID_cnt, EX_cnt, MEM_cnt, WB_cnt;
+    clk_cnt, ins_cnt, IF_cnt, ID_cnt, EX_cnt, MEM_cnt, WB_cnt;
     std::cout << "IF: " << IF_cnt << "\t" << IF_cnt * 100. / clk_cnt << "%" << std::endl;
     std::cout << "ID: " << ID_cnt << "\t" << ID_cnt * 100. / clk_cnt << "%" << std::endl;
     std::cout << "EX: " << EX_cnt << "\t" << EX_cnt * 100. / clk_cnt << "%" << std::endl;
@@ -1229,12 +1349,7 @@ int main()
     }
 
     // initialization
-    init();
-
-    if (!getInstruction("BinaryCode.txt"))
-    {
-        std::cout << "getInstruction Wrong!" << std::endl;
-    }
+    init("BinaryCode.txt");
 
     while (true)
     {
@@ -1251,7 +1366,9 @@ int main()
             {"imem", 1},
             {"dmem", 2},
             {"reg", 3},
-            {"ins ls", 4},
+            {"latch", 4},
+            {"ins ls", 5},
+            {"sdpipe", 6},
         };
         std::string strcmd;
 
@@ -1265,48 +1382,43 @@ int main()
         case -99:
             return 0;
             break;
-
         case -999:
-            init();
+            init("BinaryCode.txt");
             std::cout << "initialization" << std::endl;
             break;
-
         case -30:
             printUtilizationIns();
             break;
-
         case -31:
             printUtilizationPipe();
             break;
-
         case -20:
             printTime();
             break;
-
         case -10:
             runIns();
             break;
-
         case -11:
             runPipe();
             break;
-
         case 1:
             printIMem();
             break;
-
         case 2:
             printDMem();
             break;
-
         case 3:
             printAllRegisters();
             break;
-
         case 4:
+            printAllLatch();
+            break;
+        case 5:
             printAllInstructions("MIPSInstruction.txt");
             break;
-
+        case 6:
+            printPipeSequenceDiagram();
+            break;
         default:
             std::cout << "This cmd is not valid." << std::endl;
             break;
