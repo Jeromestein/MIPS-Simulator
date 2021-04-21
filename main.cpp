@@ -292,12 +292,19 @@ public:
     unsigned long NPC, PC;
 };
 
+/*
+Latches in each register
+    IF/ID: IR, PC, NPC
+    ID/EX: IR, PC, NPC, A, B , Imm
+    EX/MEM: IR, B, ALUOutput , cond
+    MEM/WB: IR, ALUOutput, LMD
+*/
 latchReg IF_ID, ID_EX, EX_MEM, MEM_WB;
+
 // 2KB, 2048*8bits
 std::bitset<8> IMem[2048], DMem[2048];
 std::bitset<32> Regs[32], hi, lo;
 unsigned long PC;
-int instruction_cnt;
 
 // combine 4 bytes, 4*8bits to 1 word, 32bits
 std::bitset<32> byte2word(std::bitset<8> array_byte[], long address)
@@ -340,12 +347,15 @@ long _2sComplement(std::bitset<32> binary)
     return decimal;
 }
 
-unsigned long long clk_cnt, i_cnt, IF_cnt, ID_cnt, EX_cnt, MEM_cnt, WB_cnt;
+int instruction_cnt;
+int clk_cnt, i_cnt, IF_cnt, ID_cnt, EX_cnt, MEM_cnt, WB_cnt;
 bool isBranch, waitBranch;
 bool isDataHazard, waitDataHazard;
+
 //bool RegsBusy[32];
 std::bitset<32> RegsBusy, waitRegs;
 bool DMemBusy[2048];
+
 int IF_stage()
 {
     // if wait branch, then IR all zero (not usefull work)
@@ -850,6 +860,47 @@ int MEM_stage()
 
     return 0;
 }
+
+// initial all the registers and latches
+void init()
+{
+    // reset IF_ID
+    IF_ID.IR.reset();
+    IF_ID.PC = 0;
+    IF_ID.NPC = 0;
+    // reset ID_EX
+    ID_EX.IR.reset();
+    ID_EX.PC = 0;
+    ID_EX.NPC = 0;
+    ID_EX.A.reset();
+    ID_EX.B.reset();
+    ID_EX.Imm.reset();
+    // reset EX_MEM
+    EX_MEM.IR.reset();
+    EX_MEM.B.reset();
+    EX_MEM.ALUOutput.reset();
+    EX_MEM.cond = false;
+    // reset MEM_WB
+    MEM_WB.IR.reset();
+    MEM_WB.ALUOutput.reset();
+    MEM_WB.LMD.reset();
+    // reset counters
+    clk_cnt = i_cnt = IF_cnt = ID_cnt = EX_cnt = MEM_cnt = WB_cnt = 0;
+    // reset IMem, DMem, hi, lo, Regs, PC
+    for (size_t i = 0; i < 2048; i++)
+    {
+        IMem[i].reset();
+        DMem[i].reset();
+    }
+    hi.reset();
+    lo.reset();
+    for (size_t i = 0; i < 32; i++)
+    {
+        Regs[i].reset();
+    }
+    PC = 0;
+}
+
 int WB_stage()
 {
     // if not NOP
@@ -857,10 +908,8 @@ int WB_stage()
     {
         std::cout << "WB: " << MEM_WB.IR << std::endl;
         std::string op = MEM_WB.IR.to_string().substr(0, 6);
+
         // ALU instruction
-        // Regs[MEM_WB.IR[rd]] = MEM_WB.ALUOutput;
-        //    or
-        // Regs[MEM_WB.IR[rt]] = MEM_WB.ALUOutput;
 
         // Regs[MEM_WB.IR[rd]] = MEM_WB.ALUOutput;
         if (op == "000000")
@@ -1095,6 +1144,82 @@ void printAllRegisters()
     }
 }
 
+void runIns()
+{
+    // run instruction one by one
+    int ins_num;
+    std::cout << "run instruction one by one: ";
+    std::cin >> ins_num; // input the number of instructions you wanna run
+    getchar();           // eat the Enter Key
+    for (size_t i = 0; i < ins_num; i++)
+    {
+        IF_stage();
+        clk_cnt++; // each stage takes one clk cycle
+        ID_stage();
+        clk_cnt++;
+        EX_stage();
+        clk_cnt++;
+        MEM_stage();
+        clk_cnt++;
+        WB_stage();
+        clk_cnt++;
+    }
+}
+
+void runPipe()
+{
+    // run instruction in clk
+    int clk_num;
+    std::cout << "run in clock cycles : ";
+    std::cin >> clk_num; // input the number of clk cycles you wanna run
+    getchar();           // eat the Enter Key
+    for (size_t i = 0; i < clk_num; i++)
+    {
+        std::cout << "clk_num:" << clk_cnt + 1 << std::endl;
+        WB_stage();
+        MEM_stage();
+        EX_stage();
+        ID_stage();
+        IF_stage();
+        std::cout << "Run " << i_cnt << "/" << instruction_cnt << " instruction." << std::endl;
+        // all 5 stages take only one clk cycle
+        clk_cnt++;
+    }
+}
+
+void printTime()
+{
+    // Total time (in CPU cycles)
+    std::cout << "Total time (in CPU cycles): " << clk_cnt << std::endl;
+    std::cout << "Run " << i_cnt << "/" << instruction_cnt << "instruction." << std::endl;
+}
+
+void printUtilizationIns()
+{
+    // utilization in regular mode
+    printTime();
+    // Utilization of each stage.
+    clk_cnt, i_cnt, IF_cnt, ID_cnt, EX_cnt, MEM_cnt, WB_cnt;
+    std::cout << "IF: " << IF_cnt << "\t" << IF_cnt * 100. / clk_cnt << "%" << std::endl;
+    std::cout << "ID: " << ID_cnt << "\t" << ID_cnt * 100. / clk_cnt << "%" << std::endl;
+    std::cout << "EX: " << EX_cnt << "\t" << EX_cnt * 100. / clk_cnt << "%" << std::endl;
+    std::cout << "MEM: " << MEM_cnt << "\t" << MEM_cnt * 100. / clk_cnt << "%" << std::endl;
+    std::cout << "WB: " << WB_cnt << "\t" << WB_cnt * 100. / clk_cnt << "%" << std::endl;
+}
+
+void printUtilizationPipe()
+{
+    // utilization in pipeline mode
+    printTime();
+    // Utilization of each stage.
+    clk_cnt, i_cnt, IF_cnt, ID_cnt, EX_cnt, MEM_cnt, WB_cnt;
+    std::cout << "IF: " << IF_cnt << "\t" << IF_cnt * 100. / clk_cnt << "%" << std::endl;
+    std::cout << "ID: " << ID_cnt << "\t" << ID_cnt * 100. / clk_cnt << "%" << std::endl;
+    std::cout << "EX: " << EX_cnt << "\t" << EX_cnt * 100. / clk_cnt << "%" << std::endl;
+    std::cout << "MEM: " << MEM_cnt << "\t" << MEM_cnt * 100. / clk_cnt << "%" << std::endl;
+    std::cout << "WB: " << WB_cnt << "\t" << WB_cnt * 100. / clk_cnt << "%" << std::endl;
+}
+
 int main()
 {
     // like an assembler?
@@ -1104,13 +1229,7 @@ int main()
     }
 
     // initialization
-    PC = 0;
-    clk_cnt = i_cnt = IF_cnt = ID_cnt = EX_cnt = MEM_cnt = WB_cnt = 0;
-    for (size_t i = 0; i < 2048; i++)
-    {
-        IMem[i].reset();
-        DMem[i].reset();
-    }
+    init();
 
     if (!getInstruction("BinaryCode.txt"))
     {
@@ -1120,109 +1239,56 @@ int main()
     while (true)
     {
         std::map<std::string, int> cmd = {
-            {"rins", -100},
-            {"rpipe", -101},
-            {"uins", -102},
-            {"upipe", -103},
-            {"time", -104},
-            {"exit", -1},
-            {"ins ls", -11},
+            // map[] return 0 means no finding,
+            // so int can not be 0!!!!
+            {"init", -999},
+            {"exit", -99},
+            {"uins", -30},
+            {"upipe", -31},
+            {"time", -20},
+            {"rins", -10},
+            {"rpipe", -11},
             {"imem", 1},
             {"dmem", 2},
             {"reg", 3},
-
+            {"ins ls", 4},
         };
         std::string strcmd;
 
         std::cout << "cmd:" << std::endl;
         //std::cin >> strcmd;
         getline(std::cin, strcmd);
-        std::cout << "********************************************"
-                  << std::endl;
+        std::cout << "********************************************" << std::endl;
+
         switch (cmd[strcmd])
         {
-        case -100:
-            // run instruction one by one
-            int ins_num;
-            std::cout << "run instruction one by one: ";
-            std::cin >> ins_num; // input the number of instructions you wanna run
-            getchar();           // eat the Enter Key
-            for (size_t i = 0; i < ins_num; i++)
-            {
-                IF_stage();
-                clk_cnt++; // each stage takes one clk cycle
-                ID_stage();
-                clk_cnt++;
-                EX_stage();
-                clk_cnt++;
-                MEM_stage();
-                clk_cnt++;
-                WB_stage();
-                clk_cnt++;
-            }
-
-            break;
-
-        case -101:
-            // run instruction in clk
-            int clk_num;
-            std::cout << "run in clock cycles : ";
-            std::cin >> clk_num; // input the number of clk cycles you wanna run
-            getchar();           // eat the Enter Key
-            for (size_t i = 0; i < clk_num; i++)
-            {
-                std::cout << "clk_num:" << clk_cnt + 1 << std::endl;
-                WB_stage();
-                MEM_stage();
-                EX_stage();
-                ID_stage();
-                IF_stage();
-                std::cout << "Run " << i_cnt << "/" << instruction_cnt << " instruction." << std::endl;
-                // all 5 stages take only one clk cycle
-                clk_cnt++;
-            }
-            break;
-
-        case -102:
-            // utilization in regular mode
-            // Total time (in CPU cycles)
-            std::cout << "Total time (in CPU cycles): " << clk_cnt << std::endl;
-            std::cout << "Run " << i_cnt << "/" << instruction_cnt << " instruction." << std::endl;
-            // Utilization of each stage.
-            clk_cnt, i_cnt, IF_cnt, ID_cnt, EX_cnt, MEM_cnt, WB_cnt;
-            std::cout << "IF: " << IF_cnt << "\t" << IF_cnt * 100. / clk_cnt << "%" << std::endl;
-            std::cout << "ID: " << ID_cnt << "\t" << ID_cnt * 100. / clk_cnt << "%" << std::endl;
-            std::cout << "EX: " << EX_cnt << "\t" << EX_cnt * 100. / clk_cnt << "%" << std::endl;
-            std::cout << "MEM: " << MEM_cnt << "\t" << MEM_cnt * 100. / clk_cnt << "%" << std::endl;
-            std::cout << "WB: " << WB_cnt << "\t" << WB_cnt * 100. / clk_cnt << "%" << std::endl;
-            break;
-
-        case -103:
-            // utilization in pipeline mode
-            // Total time (in CPU cycles)
-            std::cout << "Total time (in CPU cycles): " << clk_cnt << std::endl;
-            std::cout << "Run " << i_cnt << "/" << instruction_cnt << "instruction." << std::endl;
-            // Utilization of each stage.
-            clk_cnt, i_cnt, IF_cnt, ID_cnt, EX_cnt, MEM_cnt, WB_cnt;
-            std::cout << "IF: " << IF_cnt << "\t" << IF_cnt * 100. / clk_cnt << "%" << std::endl;
-            std::cout << "ID: " << ID_cnt << "\t" << ID_cnt * 100. / clk_cnt << "%" << std::endl;
-            std::cout << "EX: " << EX_cnt << "\t" << EX_cnt * 100. / clk_cnt << "%" << std::endl;
-            std::cout << "MEM: " << MEM_cnt << "\t" << MEM_cnt * 100. / clk_cnt << "%" << std::endl;
-            std::cout << "WB: " << WB_cnt << "\t" << WB_cnt * 100. / clk_cnt << "%" << std::endl;
-            break;
-
-        case -104:
-            // Total time (in CPU cycles)
-            std::cout << "Total time (in CPU cycles): " << clk_cnt << std::endl;
-            std::cout << "Run " << i_cnt << "/" << instruction_cnt << "instruction." << std::endl;
-            break;
-
-        case -1:
+        case -99:
             return 0;
             break;
 
+        case -990:
+            init();
+            std::cout << "initialization" << std::endl;
+            break;
+
+        case -30:
+            printUtilizationIns();
+            break;
+
+        case -31:
+            printUtilizationPipe();
+            break;
+
+        case -20:
+            printTime();
+            break;
+
+        case -10:
+            runIns();
+            break;
+
         case -11:
-            printAllInstructions("MIPSInstruction.txt");
+            runPipe();
             break;
 
         case 1:
@@ -1235,6 +1301,10 @@ int main()
 
         case 3:
             printAllRegisters();
+            break;
+
+        case 4:
+            printAllInstructions("MIPSInstruction.txt");
             break;
 
         default:
