@@ -1266,7 +1266,7 @@ int main()
             return 0;
             break;
 
-        case -990:
+        case -999:
             init();
             std::cout << "initialization" << std::endl;
             break;
