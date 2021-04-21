@@ -343,16 +343,25 @@ long _2sComplement(std::bitset<32> binary)
 unsigned long long clk_cnt, i_cnt, IF_cnt, ID_cnt, EX_cnt, MEM_cnt, WB_cnt;
 bool isBranch, waitBranch;
 bool isDataHazard, waitDataHazard;
-bool RegsBusy[32];
+//bool RegsBusy[32];
+std::bitset<32> RegsBusy, waitRegs;
 bool DMemBusy[2048];
 int IF_stage()
 {
-    // if wait branch, then IR all zero
+    // if wait branch, then IR all zero (not usefull work)
     if (waitBranch == true)
     {
         // insert NOPs
         IF_ID.IR = Regs[0];
         // no PC = ID_EX.NPC; (PC = PC + 4)
+    }
+    // if wait data hazard, then PC stay still (not usefull work)
+    else if (waitRegs.any() == true)
+    {
+        IF_ID.PC = PC;
+        IF_ID.NPC = PC + 4;
+
+        IF_ID.IR = byte2word(IMem, PC);
     }
     else
     {
@@ -364,11 +373,7 @@ int IF_stage()
         }
         else
         {
-            // if wait data hazard, then PC stay still
-            // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-            wrong !!!;
-            if (waitDataHazard != true)
-                PC = ID_EX.NPC;
+            PC = ID_EX.NPC;
         }
 
         IF_ID.PC = PC;
@@ -376,10 +381,65 @@ int IF_stage()
 
         IF_ID.IR = byte2word(IMem, PC);
 
+        // usefull work
         IF_cnt++;
     }
 
     return 0;
+}
+
+// Set destination register as busy
+void lockDesReg(std::bitset<32> IR)
+{
+    std::string IR_str = IR.to_string();
+
+    std::string op = IR_str.substr(0, 6);
+    std::bitset<5> rs(IR_str, 6, 5);
+    std::bitset<5> rt(IR_str, 11, 5);
+    std::bitset<16> imm(IR_str, 16, 16);
+    std::string func = IR_str.substr(26, 6);
+
+    // (different instruction has different destination register)
+    if (op == "000000")
+    {
+        // For add, sub, and, or, sll, srl: rd
+        if (func == "100000" ||
+            func == "100010" ||
+            func == "100100" ||
+            func == "100101" ||
+            func == "000000" ||
+            func == "000010")
+        {
+            std::bitset<5> rd(IR_str, 16, 5);
+            // set rd as busy in RegsBusy table
+            RegsBusy.set(rd.to_ulong());
+        }
+
+        // For mul(t): rd and the next register
+        if (func == "011000")
+        {
+            std::bitset<5> rd(IR_str, 16, 5);
+            // set rd and the next register as not busy in RegsBusy table
+            RegsBusy.set(rd.to_ulong());
+            RegsBusy.set(rd.to_ulong() + 1);
+        }
+    }
+
+    // For addi, andi, ori, slti, sltiu, lw, lui: rt
+    if (op == "001000" ||
+        op == "001100" ||
+        op == "001101" ||
+        op == "001010" ||
+        op == "001011" ||
+        op == "100011" ||
+        op == "001111")
+    {
+        std::bitset<5> rt(IR_str, 11, 5);
+        // set rt as busy in RegsBusy table
+        RegsBusy.set(rt.to_ulong());
+    }
+
+    // For beq, sw: no destination or target register(PC), so do nothing
 }
 
 int ID_stage()
@@ -400,6 +460,8 @@ int ID_stage()
 
         // data hazard detection !!!
         // (different instruction has different source and target registers)
+        // check if the target or source registers are locked,
+        // if true, wait until it is unlocked.
 
         // For add, sub, and, or, mul(t): rs & rt
         if (op == "000000" && (func == "100000" || func == "100010" ||
@@ -415,12 +477,18 @@ int ID_stage()
                 // WARNING!!!
                 ID_EX.Imm = imm.to_ulong();
 
-                waitDataHazard = false;
+                // don't need to wait
+                waitRegs.reset(rs.to_ulong());
+                waitRegs.reset(rt.to_ulong());
             }
             else
             {
                 // tell IF stage to stop fetching
-                waitDataHazard = true;
+                //waitDataHazard = true;
+                if (RegsBusy[rs.to_ulong()] == true)
+                    waitRegs.set(rs.to_ulong());
+                if (RegsBusy[rt.to_ulong()] == true)
+                    waitRegs.set(rt.to_ulong());
             }
         }
 
@@ -436,12 +504,18 @@ int ID_stage()
                 // WARNING!!!
                 ID_EX.Imm = imm.to_ulong();
 
-                waitDataHazard = false;
+                // don't need to wait
+                waitRegs.reset(rs.to_ulong());
+                waitRegs.reset(rt.to_ulong());
             }
             else
             {
                 // tell IF stage to stop fetching
-                waitDataHazard = true;
+                //waitDataHazard = true;
+                if (RegsBusy[rs.to_ulong()] == true)
+                    waitRegs.set(rs.to_ulong());
+                if (RegsBusy[rt.to_ulong()] == true)
+                    waitRegs.set(rt.to_ulong());
             }
         }
 
@@ -457,12 +531,15 @@ int ID_stage()
                 // WARNING!!!
                 ID_EX.Imm = imm.to_ulong();
 
-                waitDataHazard = false;
+                // don't need to wait
+                waitRegs.reset(rt.to_ulong());
             }
             else
             {
                 // tell IF stage to stop fetching
-                waitDataHazard = true;
+                //waitDataHazard = true;
+
+                waitRegs.set(rt.to_ulong());
             }
         }
 
@@ -484,12 +561,15 @@ int ID_stage()
                 // WARNING!!!
                 ID_EX.Imm = imm.to_ulong();
 
-                waitDataHazard = false;
+                // don't need to wait
+                waitRegs.reset(rs.to_ulong());
             }
             else
             {
                 // tell IF stage to stop fetching
-                waitDataHazard = true;
+                //waitDataHazard = true;
+
+                waitRegs.set(rs.to_ulong());
             }
         }
 
@@ -504,72 +584,31 @@ int ID_stage()
             ID_EX.Imm = imm.to_ulong();
         }
 
-        // Set destination or target register as busy
-
-        // Lock the destination register until MEM or WB stage.
-        // (different instruction has different destination or target register)
-        // check if the target or source registers are locked,
-        // if true, wait until it is unlocked.
-        if (op == "000000")
+        if (waitRegs.any() == true)
         {
-            // For add, sub, and, or, sll, srl: rd
-            if (func == "100000" ||
-                func == "100010" ||
-                func == "100100" ||
-                func == "100101" ||
-                func == "000000" ||
-                func == "000010")
-            {
-                std::bitset<5> rd(ID_EX.IR.to_string(), 16, 5);
-                // set rd as busy in RegsBusy table
-                RegsBusy[rd.to_ulong()] = true;
-            }
-
-            // For mul(t): rd and the next register
-            if (func == "011000")
-            {
-                std::bitset<5> rd(ID_EX.IR.to_string(), 16, 5);
-                // set rd and the next register as not busy in RegsBusy table
-                RegsBusy[rd.to_ulong()] = true;
-                RegsBusy[rd.to_ulong() + 1] = true;
-            }
-        }
-
-        // For addi, andi, ori, slti, sltiu, lw, lui: rt
-        if (op == "001000" ||
-            op == "001100" ||
-            op == "001101" ||
-            op == "001010" ||
-            op == "001011" ||
-            op == "100011" ||
-            op == "001111")
-        {
-            std::bitset<5> rt(ID_EX.IR.to_string(), 11, 5);
-            // set rt as busy in RegsBusy table
-            RegsBusy[rt.to_ulong()] = true;
-        }
-        // For beq, sw: no destination or target register(PC), so do nothing
-
-        /*control hazard detect*/
-        // if the instruction is branch, in this case, beq op : 000100
-        // then set waitBranch as true
-        // beq
-        if (op == "000100")
-        {
-            // tell IF stage to stop fetching
-            waitBranch = true;
-        }
-
-        if (waitDataHazard == true)
-        {
-            // if Data Hazard, then wait
+            // if any reg need to be waited
             // insert NOPs
             // flush the ID_EX latch
             ID_EX.IR = Regs[0];
         }
         else
         {
-            // if no Data Hazard, then forward PC & NPC
+            // if don't need to wait,
+            // Set destination register as busy
+            // Lock the destination register until WB stage.
+            lockDesReg(ID_EX.IR);
+
+            /*control hazard detect*/
+            // if the instruction is branch, in this case, beq op : 000100
+            // then set waitBranch as true
+            // beq
+            if (op == "000100")
+            {
+                // tell IF stage to stop fetching
+                waitBranch = true;
+            }
+
+            // forward PC & NPC
             ID_EX.PC = IF_ID.PC;
             ID_EX.NPC = IF_ID.NPC;
             ID_cnt++;
@@ -587,6 +626,11 @@ int EX_stage()
     if (EX_MEM.IR != Regs[0])
     {
         std::string op = EX_MEM.IR.to_string().substr(0, 6);
+
+        // Set destination register as busy
+        // Lock the destination register until WB stage.
+        lockDesReg(EX_MEM.IR);
+
         // ALU instruction
 
         // EX_MEM.IR = ID_EX.IR;
@@ -596,19 +640,6 @@ int EX_stage()
 
         if (op == "000000")
         {
-            /*
-                31..26  25..21  20..16  15..11  10..6   5..0
-                op      rs      rt      rd      shamt   func
-        add :   000000  rs      rt      rd      00000   100000
-        sub :   000000  rs      rt      rd      00000   100010 
-        and :   000000  rs      rt      rd      00000   100100
-        or  :   000000  rs      rt      rd      00000   100101
-
-        mul(t): 000000  rs      rt      rd      00000   011000
-
-        sll :   000000  00000   rt      rd      shamt   000000
-        srl :   000000  00000   rt      rd      shamt   000010 
-        */
             std::string func = EX_MEM.IR.to_string().substr(26, 6);
             if (func == "100000")
             {
@@ -747,13 +778,10 @@ int MEM_stage()
     if (MEM_WB.IR != Regs[0])
     {
         std::string op = MEM_WB.IR.to_string().substr(0, 6);
-        //         31..26  25..21  20..16  15..0
-        //         op      rs      rt      immediate
-        // addi:   001000  rs      rt      immediate
-        // andi:   001100  rs      rt      immediate
-        // ori :   001101  rs      rt      immediate
-        // slti:   001010  rs      rt      immediate
-        // sltiu:  001011  rs      rt      immediate
+
+        // Set destination register as busy
+        // Lock the destination register until WB stage.
+        lockDesReg(MEM_WB.IR);
 
         // ALU instruction
         // MEM_WB.IR = EX_MEM.IR;
@@ -784,13 +812,6 @@ int MEM_stage()
             // we have to make sure that set waitBranch as false after IF stage
         }
 
-        /*
-                31..26  25..21  20..16  15..0
-                op      rs      rt      immediate
-        lw  :   100011  rs      rt      immediate
-        sw  :   101011  rs      rt      immediate
-        lui :   001111  00000   rt      immediate   
-        */
         // //Load or store instruction
         // MEM_WB.IR = EX_MEM.IR;
         // MEM_WB.LMD = DMem[EX_MEM.ALUOutput];
@@ -834,7 +855,7 @@ int WB_stage()
     // if not NOP
     if (MEM_WB.IR != Regs[0])
     {
-
+        std::cout << "WB: " << MEM_WB.IR << std::endl;
         std::string op = MEM_WB.IR.to_string().substr(0, 6);
         // ALU instruction
         // Regs[MEM_WB.IR[rd]] = MEM_WB.ALUOutput;
@@ -856,7 +877,16 @@ int WB_stage()
                 std::bitset<5> rd(MEM_WB.IR.to_string(), 16, 5);
                 Regs[rd.to_ulong()] = MEM_WB.ALUOutput;
                 // set rd as not busy in RegsBusy table
-                RegsBusy[rd.to_ulong()] = false;
+                RegsBusy.reset(rd.to_ulong());
+
+                // if (RegsBusy.any() == false)
+                // {
+                //     // if all the regs are not busy,
+                //     // then tell IF stage to begin fetching
+                //     waitDataHazard = false;
+                // }
+                if (waitRegs[rd.to_ulong()] == true)
+                    waitRegs.reset(rd.to_ulong());
             }
 
             // mul(t)
@@ -869,20 +899,24 @@ int WB_stage()
                 std::bitset<5> rd(MEM_WB.IR.to_string(), 16, 5);
                 Regs[rd.to_ulong()] = lo;
                 Regs[rd.to_ulong() + 1] = hi;
+
                 // set rd and the next register as not busy in RegsBusy table
-                RegsBusy[rd.to_ulong()] = false;
-                RegsBusy[rd.to_ulong() + 1] = false;
+                RegsBusy.reset(rd.to_ulong());
+                RegsBusy.reset(rd.to_ulong() + 1);
+
+                // if (RegsBusy.any() == false)
+                // {
+                //     // if all the regs are not busy,
+                //     // then tell IF stage to begin fetching
+                //     waitDataHazard = false;
+                // }
+                if (waitRegs[rd.to_ulong()] == true)
+                    waitRegs.reset(rd.to_ulong());
+                if (waitRegs[rd.to_ulong() + 1] == true)
+                    waitRegs.reset(rd.to_ulong() + 1);
             }
         }
-        /*
-                31..26  25..21  20..16  15..0
-                op      rs      rt      immediate
-        addi:   001000  rs      rt      immediate
-        andi:   001100  rs      rt      immediate
-        ori :   001101  rs      rt      immediate
-        slti:   001010  rs      rt      immediate
-        sltiu:  001011  rs      rt      immediate
-        */
+
         // Regs[MEM_WB.IR[rt]] = MEM_WB.ALUOutput;
         // addi, andi, ori, slti, sltiu
         if (op == "001000" ||
@@ -891,28 +925,41 @@ int WB_stage()
             op == "001010" ||
             op == "001011")
         {
-            std::bitset<5> rt(IF_ID.IR.to_string(), 11, 5);
+            std::bitset<5> rt(MEM_WB.IR.to_string(), 11, 5);
             Regs[rt.to_ulong()] = MEM_WB.ALUOutput;
             // set rt as not busy in RegsBusy table
-            RegsBusy[rt.to_ulong()] = false;
+            RegsBusy.reset(rt.to_ulong());
+
+            // if (RegsBusy.any() == false)
+            // {
+            //     // if all the regs are not busy,
+            //     // then tell IF stage to begin fetching
+            //     waitDataHazard = false;
+            // }
+            if (waitRegs[rt.to_ulong()] == true)
+                waitRegs.reset(rt.to_ulong());
         }
 
         // Load or store instruction
         // //For load only:
         // Regs[MEM_WB.IR[rt]] = MEM_WB.LMD;
-        /*
-                31..26  25..21  20..16  15..0
-                op      rs      rt      immediate
-        lw  :   100011  rs      rt      immediate
-        lui :   001111  00000   rt      immediate   
-        */
+
         // lw
         if (op == "100011")
         {
             std::bitset<5> rt(MEM_WB.IR.to_string(), 11, 5);
             Regs[rt.to_ulong()] = MEM_WB.LMD;
             // set rt as not busy in RegsBusy table
-            RegsBusy[rt.to_ulong()] = false;
+            RegsBusy.reset(rt.to_ulong());
+
+            // if (RegsBusy.any() == false)
+            // {
+            //     // if all the regs are not busy,
+            //     // then tell IF stage to begin fetching
+            //     waitDataHazard = false;
+            // }
+            if (waitRegs[rt.to_ulong()] == true)
+                waitRegs.reset(rt.to_ulong());
         }
 
         // lui
@@ -921,12 +968,22 @@ int WB_stage()
             std::bitset<5> rt(MEM_WB.IR.to_string(), 11, 5);
             Regs[rt.to_ulong()] = EX_MEM.ALUOutput;
             // set rt as not busy in RegsBusy table
-            RegsBusy[rt.to_ulong()] = false;
+            RegsBusy.reset(rt.to_ulong());
+
+            // if (RegsBusy.any() == false)
+            // {
+            //     // if all the regs are not busy,
+            //     // then tell IF stage to begin fetching
+            //     waitDataHazard = false;
+            // }
+            if (waitRegs[rt.to_ulong()] == true)
+                waitRegs.reset(rt.to_ulong());
         }
 
         WB_cnt++;
         // complete one instruction
         i_cnt++;
+        std::cout << MEM_WB.IR << " is finished." << std::endl;
     }
 
     return 0;
@@ -991,7 +1048,7 @@ void printAllInstructions(std::string fMIPSInstruction)
     // if PC is
     if (instruction_cnt <= IF_ID.NPC / 4)
     {
-        std::cout << "--------------complete the all-----------------" << std::endl;
+        std::cout << "--------------walk through all the instructions---------------" << std::endl;
     }
 
     ifs.close();
@@ -1007,7 +1064,7 @@ void printIMem()
                   << IMem[i * 4 + 2] << " "
                   << IMem[i * 4 + 3];
 
-        if (i == PC)
+        if (i * 4 == PC)
         {
             std::cout << "\t<< PC";
         }
@@ -1065,8 +1122,9 @@ int main()
         std::map<std::string, int> cmd = {
             {"rins", -100},
             {"rpipe", -101},
-            {"u", -102},
-            {"time", -103},
+            {"uins", -102},
+            {"upipe", -103},
+            {"time", -104},
             {"exit", -1},
             {"ins ls", -11},
             {"imem", 1},
@@ -1113,19 +1171,23 @@ int main()
             getchar();           // eat the Enter Key
             for (size_t i = 0; i < clk_num; i++)
             {
+                std::cout << "clk_num:" << clk_cnt + 1 << std::endl;
                 WB_stage();
                 MEM_stage();
                 EX_stage();
                 ID_stage();
                 IF_stage();
+                std::cout << "Run " << i_cnt << "/" << instruction_cnt << " instruction." << std::endl;
                 // all 5 stages take only one clk cycle
                 clk_cnt++;
             }
             break;
 
         case -102:
+            // utilization in regular mode
             // Total time (in CPU cycles)
             std::cout << "Total time (in CPU cycles): " << clk_cnt << std::endl;
+            std::cout << "Run " << i_cnt << "/" << instruction_cnt << " instruction." << std::endl;
             // Utilization of each stage.
             clk_cnt, i_cnt, IF_cnt, ID_cnt, EX_cnt, MEM_cnt, WB_cnt;
             std::cout << "IF: " << IF_cnt << "\t" << IF_cnt * 100. / clk_cnt << "%" << std::endl;
@@ -1136,8 +1198,23 @@ int main()
             break;
 
         case -103:
+            // utilization in pipeline mode
             // Total time (in CPU cycles)
             std::cout << "Total time (in CPU cycles): " << clk_cnt << std::endl;
+            std::cout << "Run " << i_cnt << "/" << instruction_cnt << "instruction." << std::endl;
+            // Utilization of each stage.
+            clk_cnt, i_cnt, IF_cnt, ID_cnt, EX_cnt, MEM_cnt, WB_cnt;
+            std::cout << "IF: " << IF_cnt << "\t" << IF_cnt * 100. / clk_cnt << "%" << std::endl;
+            std::cout << "ID: " << ID_cnt << "\t" << ID_cnt * 100. / clk_cnt << "%" << std::endl;
+            std::cout << "EX: " << EX_cnt << "\t" << EX_cnt * 100. / clk_cnt << "%" << std::endl;
+            std::cout << "MEM: " << MEM_cnt << "\t" << MEM_cnt * 100. / clk_cnt << "%" << std::endl;
+            std::cout << "WB: " << WB_cnt << "\t" << WB_cnt * 100. / clk_cnt << "%" << std::endl;
+            break;
+
+        case -104:
+            // Total time (in CPU cycles)
+            std::cout << "Total time (in CPU cycles): " << clk_cnt << std::endl;
+            std::cout << "Run " << i_cnt << "/" << instruction_cnt << "instruction." << std::endl;
             break;
 
         case -1:
