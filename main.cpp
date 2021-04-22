@@ -1140,8 +1140,8 @@ bool init(std::string fBinaryCode)
     return true;
 }
 
-// Sequence Diagram of pipeline
-void printPipeSequenceDiagram()
+// Time Graph of pipeline
+void printPipeTimeGraph()
 {
     // std::cout << "  ";
     // for (size_t i = 1; i <= clk_cnt; i++)
@@ -1149,7 +1149,7 @@ void printPipeSequenceDiagram()
     //     std::cout << i << " ";
     // }
     // std::cout << std::endl;
-    std::cout << "Sequence Diagram of pipeline:" << std::endl;
+    std::cout << "Time Graph of pipeline:" << std::endl;
     for (size_t i = 1; i <= ins_cnt; i++)
     {
         std::cout << i << " ";
@@ -1169,7 +1169,8 @@ void printPipeSequenceDiagram()
             std::cout << "D "
                       << "E "
                       << "M "
-                      << "W " << std::endl;
+                      << "W "
+                      << "(" << ins_end[i] << ")" << std::endl;
         }
         // waitRegs
         else if (ins_waitType[i] == 2)
@@ -1181,11 +1182,13 @@ void printPipeSequenceDiagram()
             }
             std::cout << "E "
                       << "M "
-                      << "W " << std::endl;
+                      << "W "
+                      << "(" << ins_end[i] << ")" << std::endl;
         }
         else
         {
-            std::cout << "F D E M W" << std::endl;
+            std::cout << "F D E M W"
+                      << "(" << ins_end[i] << ")" << std::endl;
         }
     }
 }
@@ -1384,13 +1387,13 @@ int main()
             {"time", -20},
             {"rins", -10},
             {"rpins", -11},
-            {"rpclk", -11},
+            {"rpclk", -12},
             {"imem", 1},
             {"dmem", 2},
             {"reg", 3},
             {"latch", 4},
             {"ins ls", 5},
-            {"sdpipe", 6},
+            {"tgpipe", 6},
         };
         std::string strcmd;
 
@@ -1442,7 +1445,7 @@ int main()
             printAllInstructions("MIPSInstruction.txt");
             break;
         case 6:
-            printPipeSequenceDiagram();
+            printPipeTimeGraph();
             break;
         default:
             std::cout << "This cmd is not valid." << std::endl;
