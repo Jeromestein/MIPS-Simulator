@@ -1068,7 +1068,7 @@ void printAllInstructions(std::string fMIPSInstruction)
             // format, transfer to lowercase
             std::transform(line.begin(), line.end(), back_inserter(str), ::tolower);
 
-            std::cout << i << "\t";
+            std::cout << i + 1 << "\t";
             std::cout << str;
 
             if (i == IF_ID.NPC / 4)
@@ -1136,6 +1136,11 @@ bool init(std::string fBinaryCode)
     {
         std::cout << "getInstruction Wrong!" << std::endl;
     }
+
+    waitBranch = false;
+    waitRegs.reset();
+    RegsBusy.reset();
+    std::cout << "Initialize successfully" << std::endl;
 
     return true;
 }
@@ -1408,8 +1413,7 @@ int main()
             return 0;
             break;
         case -999:
-            if (init("BinaryCode.txt") == true)
-                std::cout << "Initialize successfully" << std::endl;
+            init("BinaryCode.txt");
             break;
         case -30:
             printUtilizationIns();
