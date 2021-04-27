@@ -932,6 +932,7 @@ int WB_stage()
                 if (waitRegs[rd.to_ulong() + 1] == true)
                     waitRegs.reset(rd.to_ulong() + 1);
             }
+            WB_cnt++;
         }
 
         // Regs[MEM_WB.IR[rt]] = MEM_WB.ALUOutput;
@@ -955,6 +956,7 @@ int WB_stage()
             // }
             if (waitRegs[rt.to_ulong()] == true)
                 waitRegs.reset(rt.to_ulong());
+            WB_cnt++;
         }
 
         // Load or store instruction
@@ -977,6 +979,7 @@ int WB_stage()
             // }
             if (waitRegs[rt.to_ulong()] == true)
                 waitRegs.reset(rt.to_ulong());
+            WB_cnt++;
         }
 
         // lui
@@ -995,6 +998,7 @@ int WB_stage()
             // }
             if (waitRegs[rt.to_ulong()] == true)
                 waitRegs.reset(rt.to_ulong());
+            WB_cnt++;
         }
 
         // complete one instruction
@@ -1002,7 +1006,6 @@ int WB_stage()
         ID_cnt++;
         EX_cnt++;
 
-        WB_cnt++;
         ins_cnt++;
         // get the end and start time
         ins_end[ins_cnt] = clk_cnt + 1;
