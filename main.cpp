@@ -398,7 +398,7 @@ int IF_stage()
         IF_ID.IR = byte2word(IMem, PC);
 
         // usefull work
-        IF_cnt++;
+        // IF_cnt++;
     }
 
     return 0;
@@ -629,7 +629,7 @@ int ID_stage()
             // forward PC & NPC
             ID_EX.PC = IF_ID.PC;
             ID_EX.NPC = IF_ID.NPC;
-            ID_cnt++;
+            //ID_cnt++;
         }
     }
 
@@ -784,7 +784,7 @@ int EX_stage()
             // next ins:            IF  ID  EX  MEM WB
             // we have to make sure that set waitBranch as false after IF stage
         }
-        EX_cnt++;
+        //EX_cnt++;
     }
 
     return 0;
@@ -997,9 +997,12 @@ int WB_stage()
                 waitRegs.reset(rt.to_ulong());
         }
 
-        WB_cnt++;
-
         // complete one instruction
+        IF_cnt++;
+        ID_cnt++;
+        EX_cnt++;
+
+        WB_cnt++;
         ins_cnt++;
         // get the end and start time
         ins_end[ins_cnt] = clk_cnt + 1;
