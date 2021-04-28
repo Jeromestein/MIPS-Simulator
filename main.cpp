@@ -7,6 +7,7 @@
 #include <string>
 #include <fstream>
 #include <algorithm>
+#include <memory.h>
 
 #define TGDebug 1
 
@@ -401,7 +402,8 @@ int IF_stage()
         IF_ID.IR = byte2word(IMem, PC);
 
         // usefull work
-        IF_cnt++;
+        if (IF_ID.IR != Regs[0])
+            IF_cnt++;
 
 #ifdef TGDebug
         std::cout << "IF does useful work." << std::endl;
