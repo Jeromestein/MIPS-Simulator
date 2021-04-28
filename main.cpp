@@ -8,6 +8,8 @@
 #include <fstream>
 #include <algorithm>
 
+#define TGDebug 1
+
 //1. the 1st step, a Assembler can transfer assembly code to binary machine code, and vice versa.
 /*
 only support the following instructions: 
@@ -349,11 +351,12 @@ long _2sComplement(std::bitset<32> binary)
 
 int instruction_cnt;
 int clk_cnt, ins_cnt, IF_cnt, ID_cnt, EX_cnt, MEM_cnt, WB_cnt;
-int ins_start[2048], ins_end[2048];
+int ins_start[2048], ins_end[2048], ins_waitType[2048];
+int ins_TG[2048][5]; // store the time of each stage
 std::bitset<1> IF_waitBranch[2048], ID_waitRegs[2048];
 // 1: waitBranch
 // 2: waitRegs
-int ins_waitType[2048];
+
 bool isBranch, waitBranch;
 bool isDataHazard, waitDataHazard;
 
@@ -398,7 +401,11 @@ int IF_stage()
         IF_ID.IR = byte2word(IMem, PC);
 
         // usefull work
-        // IF_cnt++;
+        IF_cnt++;
+
+#ifdef TGDebug
+        std::cout << "IF does useful work." << std::endl;
+#endif
     }
 
     return 0;
@@ -629,7 +636,10 @@ int ID_stage()
             // forward PC & NPC
             ID_EX.PC = IF_ID.PC;
             ID_EX.NPC = IF_ID.NPC;
-            //ID_cnt++;
+            ID_cnt++;
+#ifdef TGDebug
+            std::cout << "ID does useful work." << std::endl;
+#endif
         }
     }
 
@@ -784,7 +794,10 @@ int EX_stage()
             // next ins:            IF  ID  EX  MEM WB
             // we have to make sure that set waitBranch as false after IF stage
         }
-        //EX_cnt++;
+        EX_cnt++;
+#ifdef TGDebug
+        std::cout << "EX does useful work." << std::endl;
+#endif
     }
 
     return 0;
@@ -863,6 +876,9 @@ int MEM_stage()
             }
 
             MEM_cnt++;
+#ifdef TGDebug
+            std::cout << "MEM does useful work." << std::endl;
+#endif
         }
     }
 
@@ -877,134 +893,142 @@ int WB_stage()
         std::cout << "WB: " << MEM_WB.IR << std::endl;
         std::string op = MEM_WB.IR.to_string().substr(0, 6);
 
-        // ALU instruction
-
-        // Regs[MEM_WB.IR[rd]] = MEM_WB.ALUOutput;
-        if (op == "000000")
-        {
-            // add, sub, and, or, sll, srl
-            std::string func = MEM_WB.IR.to_string().substr(26, 6);
-            if (func == "100000" ||
-                func == "100010" ||
-                func == "100100" ||
-                func == "100101" ||
-                func == "000000" ||
-                func == "000010")
-            {
-                std::bitset<5> rd(MEM_WB.IR.to_string(), 16, 5);
-                Regs[rd.to_ulong()] = MEM_WB.ALUOutput;
-                // set rd as not busy in RegsBusy table
-                RegsBusy.reset(rd.to_ulong());
-
-                // if (RegsBusy.any() == false)
-                // {
-                //     // if all the regs are not busy,
-                //     // then tell IF stage to begin fetching
-                //     waitDataHazard = false;
-                // }
-                if (waitRegs[rd.to_ulong()] == true)
-                    waitRegs.reset(rd.to_ulong());
-            }
-
-            // mul(t)
-            if (func == "011000")
-            {
-                // Assume the syntax for mul is mul $a,$b,$c,
-                // meaning that we multiply the contents of $b and $c,
-                // the least significant 32 bits of results are placed in register $a
-                // and the most significant 32-bits of the result will be stored in register $(a+1)
-                std::bitset<5> rd(MEM_WB.IR.to_string(), 16, 5);
-                Regs[rd.to_ulong()] = lo;
-                Regs[rd.to_ulong() + 1] = hi;
-
-                // set rd and the next register as not busy in RegsBusy table
-                RegsBusy.reset(rd.to_ulong());
-                RegsBusy.reset(rd.to_ulong() + 1);
-
-                // if (RegsBusy.any() == false)
-                // {
-                //     // if all the regs are not busy,
-                //     // then tell IF stage to begin fetching
-                //     waitDataHazard = false;
-                // }
-                if (waitRegs[rd.to_ulong()] == true)
-                    waitRegs.reset(rd.to_ulong());
-                if (waitRegs[rd.to_ulong() + 1] == true)
-                    waitRegs.reset(rd.to_ulong() + 1);
-            }
-            WB_cnt++;
-        }
-
-        // Regs[MEM_WB.IR[rt]] = MEM_WB.ALUOutput;
-        // addi, andi, ori, slti, sltiu
-        if (op == "001000" ||
+        // WB do the useful work
+        if (op == "000000" ||
+            op == "001000" ||
             op == "001100" ||
             op == "001101" ||
             op == "001010" ||
-            op == "001011")
+            op == "001011" ||
+            op == "100011" ||
+            op == "001111")
         {
-            std::bitset<5> rt(MEM_WB.IR.to_string(), 11, 5);
-            Regs[rt.to_ulong()] = MEM_WB.ALUOutput;
-            // set rt as not busy in RegsBusy table
-            RegsBusy.reset(rt.to_ulong());
+            // ALU instruction
 
-            // if (RegsBusy.any() == false)
-            // {
-            //     // if all the regs are not busy,
-            //     // then tell IF stage to begin fetching
-            //     waitDataHazard = false;
-            // }
-            if (waitRegs[rt.to_ulong()] == true)
-                waitRegs.reset(rt.to_ulong());
+            // Regs[MEM_WB.IR[rd]] = MEM_WB.ALUOutput;
+            if (op == "000000")
+            {
+                // add, sub, and, or, sll, srl
+                std::string func = MEM_WB.IR.to_string().substr(26, 6);
+                if (func == "100000" ||
+                    func == "100010" ||
+                    func == "100100" ||
+                    func == "100101" ||
+                    func == "000000" ||
+                    func == "000010")
+                {
+                    std::bitset<5> rd(MEM_WB.IR.to_string(), 16, 5);
+                    Regs[rd.to_ulong()] = MEM_WB.ALUOutput;
+                    // set rd as not busy in RegsBusy table
+                    RegsBusy.reset(rd.to_ulong());
+
+                    // if (RegsBusy.any() == false)
+                    // {
+                    //     // if all the regs are not busy,
+                    //     // then tell IF stage to begin fetching
+                    //     waitDataHazard = false;
+                    // }
+                    if (waitRegs[rd.to_ulong()] == true)
+                        waitRegs.reset(rd.to_ulong());
+                }
+
+                // mul(t)
+                if (func == "011000")
+                {
+                    // Assume the syntax for mul is mul $a,$b,$c,
+                    // meaning that we multiply the contents of $b and $c,
+                    // the least significant 32 bits of results are placed in register $a
+                    // and the most significant 32-bits of the result will be stored in register $(a+1)
+                    std::bitset<5> rd(MEM_WB.IR.to_string(), 16, 5);
+                    Regs[rd.to_ulong()] = lo;
+                    Regs[rd.to_ulong() + 1] = hi;
+
+                    // set rd and the next register as not busy in RegsBusy table
+                    RegsBusy.reset(rd.to_ulong());
+                    RegsBusy.reset(rd.to_ulong() + 1);
+
+                    // if (RegsBusy.any() == false)
+                    // {
+                    //     // if all the regs are not busy,
+                    //     // then tell IF stage to begin fetching
+                    //     waitDataHazard = false;
+                    // }
+                    if (waitRegs[rd.to_ulong()] == true)
+                        waitRegs.reset(rd.to_ulong());
+                    if (waitRegs[rd.to_ulong() + 1] == true)
+                        waitRegs.reset(rd.to_ulong() + 1);
+                }
+            }
+
+            // Regs[MEM_WB.IR[rt]] = MEM_WB.ALUOutput;
+            // addi, andi, ori, slti, sltiu
+            if (op == "001000" ||
+                op == "001100" ||
+                op == "001101" ||
+                op == "001010" ||
+                op == "001011")
+            {
+                std::bitset<5> rt(MEM_WB.IR.to_string(), 11, 5);
+                Regs[rt.to_ulong()] = MEM_WB.ALUOutput;
+                // set rt as not busy in RegsBusy table
+                RegsBusy.reset(rt.to_ulong());
+
+                // if (RegsBusy.any() == false)
+                // {
+                //     // if all the regs are not busy,
+                //     // then tell IF stage to begin fetching
+                //     waitDataHazard = false;
+                // }
+                if (waitRegs[rt.to_ulong()] == true)
+                    waitRegs.reset(rt.to_ulong());
+            }
+
+            // Load or store instruction
+            // //For load only:
+            // Regs[MEM_WB.IR[rt]] = MEM_WB.LMD;
+
+            // lw
+            if (op == "100011")
+            {
+                std::bitset<5> rt(MEM_WB.IR.to_string(), 11, 5);
+                Regs[rt.to_ulong()] = MEM_WB.LMD;
+                // set rt as not busy in RegsBusy table
+                RegsBusy.reset(rt.to_ulong());
+
+                // if (RegsBusy.any() == false)
+                // {
+                //     // if all the regs are not busy,
+                //     // then tell IF stage to begin fetching
+                //     waitDataHazard = false;
+                // }
+                if (waitRegs[rt.to_ulong()] == true)
+                    waitRegs.reset(rt.to_ulong());
+            }
+
+            // lui
+            if (op == "001111")
+            {
+                std::bitset<5> rt(MEM_WB.IR.to_string(), 11, 5);
+                Regs[rt.to_ulong()] = EX_MEM.ALUOutput;
+                // set rt as not busy in RegsBusy table
+                RegsBusy.reset(rt.to_ulong());
+
+                // if (RegsBusy.any() == false)
+                // {
+                //     // if all the regs are not busy,
+                //     // then tell IF stage to begin fetching
+                //     waitDataHazard = false;
+                // }
+                if (waitRegs[rt.to_ulong()] == true)
+                    waitRegs.reset(rt.to_ulong());
+            }
             WB_cnt++;
-        }
-
-        // Load or store instruction
-        // //For load only:
-        // Regs[MEM_WB.IR[rt]] = MEM_WB.LMD;
-
-        // lw
-        if (op == "100011")
-        {
-            std::bitset<5> rt(MEM_WB.IR.to_string(), 11, 5);
-            Regs[rt.to_ulong()] = MEM_WB.LMD;
-            // set rt as not busy in RegsBusy table
-            RegsBusy.reset(rt.to_ulong());
-
-            // if (RegsBusy.any() == false)
-            // {
-            //     // if all the regs are not busy,
-            //     // then tell IF stage to begin fetching
-            //     waitDataHazard = false;
-            // }
-            if (waitRegs[rt.to_ulong()] == true)
-                waitRegs.reset(rt.to_ulong());
-            WB_cnt++;
-        }
-
-        // lui
-        if (op == "001111")
-        {
-            std::bitset<5> rt(MEM_WB.IR.to_string(), 11, 5);
-            Regs[rt.to_ulong()] = EX_MEM.ALUOutput;
-            // set rt as not busy in RegsBusy table
-            RegsBusy.reset(rt.to_ulong());
-
-            // if (RegsBusy.any() == false)
-            // {
-            //     // if all the regs are not busy,
-            //     // then tell IF stage to begin fetching
-            //     waitDataHazard = false;
-            // }
-            if (waitRegs[rt.to_ulong()] == true)
-                waitRegs.reset(rt.to_ulong());
-            WB_cnt++;
+#ifdef TGDebug
+            std::cout << "WB does useful work." << std::endl;
+#endif
         }
 
         // complete one instruction
-        IF_cnt++;
-        ID_cnt++;
-        EX_cnt++;
 
         ins_cnt++;
         // get the end and start time
@@ -1146,6 +1170,12 @@ bool init(std::string fBinaryCode)
     waitBranch = false;
     waitRegs.reset();
     RegsBusy.reset();
+
+    // clear ins end start time, ins waitType, ins TG
+    memset(ins_start, 0, 2048 * sizeof(int));
+    memset(ins_end, 0, 2048 * sizeof(int));
+    memset(ins_waitType, 0, 2048 * sizeof(int));
+    memset(ins_TG, 0, 2048 * 5 * sizeof(int));
     std::cout << "Initialize successfully" << std::endl;
 
     return true;
@@ -1154,12 +1184,6 @@ bool init(std::string fBinaryCode)
 // Time Graph of pipeline
 void printPipeTimeGraph()
 {
-    // std::cout << "  ";
-    // for (size_t i = 1; i <= clk_cnt; i++)
-    // {
-    //     std::cout << i << " ";
-    // }
-    // std::cout << std::endl;
     std::cout << "Time Graph of pipeline:" << std::endl;
     for (size_t i = 1; i <= ins_cnt; i++)
     {
