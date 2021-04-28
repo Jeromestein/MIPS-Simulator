@@ -355,7 +355,8 @@ int instruction_cnt;
 int clk_cnt, ins_cnt, IF_cnt, ID_cnt, EX_cnt, MEM_cnt, WB_cnt;
 int IF_crt_ins_cnt, ID_crt_ins_cnt, EX_crt_ins_cnt, MEM_crt_ins_cnt, WB_crt_ins_cnt;
 int ins_start[2048], ins_end[2048], ins_waitType[2048];
-int ins_TG[2048][5]; // store the time of each stage
+int ins_TG[2048][5];                            // store the time of each stage
+bool MEM_usefulWork[2048], WB_usefulWork[2048]; // store the time of doing useful work
 std::bitset<1> IF_waitBranch[2048], ID_waitRegs[2048];
 // 1: waitBranch
 // 2: waitRegs
@@ -894,6 +895,7 @@ int MEM_stage()
             }
 
             MEM_cnt++;
+            MEM_usefulWork[clk_cnt + 1] = true;
 #ifdef TGDebug
             std::cout << "MEM does useful work." << std::endl;
 #endif
@@ -1047,6 +1049,7 @@ int WB_stage()
                     waitRegs.reset(rt.to_ulong());
             }
             WB_cnt++;
+            WB_usefulWork[clk_cnt + 1] = true;
 #ifdef TGDebug
             std::cout << "WB does useful work." << std::endl;
 #endif
@@ -1203,6 +1206,9 @@ bool init(std::string fBinaryCode)
     waitRegs.reset();
     RegsBusy.reset();
 
+    // clear MEM_usefulWork, WB_usefulWork
+    memset(MEM_usefulWork, false, 2048 * sizeof(bool));
+    memset(WB_usefulWork, false, 2048 * sizeof(bool));
     // clear ins end start time, ins waitType, ins TG
     memset(ins_start, 0, 2048 * sizeof(int));
     memset(ins_end, 0, 2048 * sizeof(int));
@@ -1317,7 +1323,14 @@ void printPipeTimeGraphRT()
         // print M
         if (ins_TG[i][3] != 0)
         {
-            std::cout << "M ";
+            if (MEM_usefulWork[ins_TG[i][3]] == true)
+            {
+                std::cout << "M*";
+            }
+            else
+            {
+                std::cout << "M ";
+            }
             if (ins_TG[i][3] > ins_TG[i][2] + 1)
             {
                 // print -, means bubble
@@ -1331,7 +1344,14 @@ void printPipeTimeGraphRT()
         // print W
         if (ins_TG[i][4] != 0)
         {
-            std::cout << "W ";
+            if (WB_usefulWork[ins_TG[i][4]] == true)
+            {
+                std::cout << "W*";
+            }
+            else
+            {
+                std::cout << "W ";
+            }
             if (ins_TG[i][4] > ins_TG[i][3] + 1)
             {
                 // print -, means bubble
