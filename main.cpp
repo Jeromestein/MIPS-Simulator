@@ -308,6 +308,7 @@ latchReg IF_ID, ID_EX, EX_MEM, MEM_WB;
 std::bitset<8> IMem[2048], DMem[2048];
 std::bitset<32> Regs[32], hi, lo;
 unsigned long PC;
+bool pipelineMode;
 
 // combine 4 bytes, 4*8bits to 1 word, 32bits
 std::bitset<32> byte2word(std::bitset<8> array_byte[], long address)
@@ -352,6 +353,7 @@ long _2sComplement(std::bitset<32> binary)
 
 int instruction_cnt;
 int clk_cnt, ins_cnt, IF_cnt, ID_cnt, EX_cnt, MEM_cnt, WB_cnt;
+int IF_crt_ins_cnt, ID_crt_ins_cnt, EX_crt_ins_cnt, MEM_crt_ins_cnt, WB_crt_ins_cnt;
 int ins_start[2048], ins_end[2048], ins_waitType[2048];
 int ins_TG[2048][5]; // store the time of each stage
 std::bitset<1> IF_waitBranch[2048], ID_waitRegs[2048];
@@ -403,7 +405,13 @@ int IF_stage()
 
         // usefull work
         if (IF_ID.IR != Regs[0])
+        {
             IF_cnt++;
+            if (pipelineMode == true)
+            {
+                ins_TG[IF_cnt][0] = clk_cnt + 1;
+            }
+        }
 
 #ifdef TGDebug
         std::cout << "IF does useful work." << std::endl;
@@ -639,6 +647,10 @@ int ID_stage()
             ID_EX.PC = IF_ID.PC;
             ID_EX.NPC = IF_ID.NPC;
             ID_cnt++;
+            if (pipelineMode == true)
+            {
+                ins_TG[ID_cnt][1] = clk_cnt + 1;
+            }
 #ifdef TGDebug
             std::cout << "ID does useful work." << std::endl;
 #endif
@@ -797,6 +809,10 @@ int EX_stage()
             // we have to make sure that set waitBranch as false after IF stage
         }
         EX_cnt++;
+        if (pipelineMode == true)
+        {
+            ins_TG[EX_cnt][2] = clk_cnt + 1;
+        }
 #ifdef TGDebug
         std::cout << "EX does useful work." << std::endl;
 #endif
@@ -881,6 +897,12 @@ int MEM_stage()
 #ifdef TGDebug
             std::cout << "MEM does useful work." << std::endl;
 #endif
+        }
+        if (pipelineMode == true)
+        {
+            // in most cases, MEM is right next to EX
+            MEM_crt_ins_cnt = EX_cnt;
+            ins_TG[MEM_crt_ins_cnt][3] = clk_cnt + 1;
         }
     }
 
@@ -1030,9 +1052,16 @@ int WB_stage()
 #endif
         }
 
+        if (pipelineMode == true)
+        {
+            // in most cases, WB is right next to MEM and MEM is right next to EX
+            WB_crt_ins_cnt = MEM_crt_ins_cnt;
+            ins_TG[WB_crt_ins_cnt][4] = clk_cnt + 1;
+        }
         // complete one instruction
-
         ins_cnt++;
+        WB_crt_ins_cnt = ins_cnt;
+
         // get the end and start time
         ins_end[ins_cnt] = clk_cnt + 1;
         if (ins_cnt == 1)
@@ -1146,6 +1175,7 @@ bool init(std::string fBinaryCode)
     MEM_WB.LMD.reset();
     // reset counters
     clk_cnt = ins_cnt = IF_cnt = ID_cnt = EX_cnt = MEM_cnt = WB_cnt = 0;
+    IF_crt_ins_cnt = ID_crt_ins_cnt = EX_crt_ins_cnt = MEM_crt_ins_cnt = WB_crt_ins_cnt = 0;
     // reset IMem, DMem, hi, lo, Regs, PC
     for (size_t i = 0; i < 2048; i++)
     {
@@ -1178,17 +1208,20 @@ bool init(std::string fBinaryCode)
     memset(ins_end, 0, 2048 * sizeof(int));
     memset(ins_waitType, 0, 2048 * sizeof(int));
     memset(ins_TG, 0, 2048 * 5 * sizeof(int));
+
     std::cout << "Initialize successfully" << std::endl;
 
     return true;
 }
 
 // Time Graph of pipeline
+// old version
 void printPipeTimeGraph()
 {
-    std::cout << "Time Graph of pipeline:" << std::endl;
+    std::cout << "Time Graph of pipeline(updata after WB):" << std::endl;
     for (size_t i = 1; i <= ins_cnt; i++)
     {
+        std::cout.width(4);
         std::cout << i << " ";
         for (size_t j = 1; j < ins_start[i]; j++)
         {
@@ -1224,9 +1257,94 @@ void printPipeTimeGraph()
         }
         else
         {
-            std::cout << "F D E M W"
+            std::cout << "F D E M W "
                       << "(" << ins_end[i] << ")" << std::endl;
         }
+    }
+}
+
+// Time Graph of pipeline
+// update after each stage(real time)
+void printPipeTimeGraphRT()
+{
+    std::cout << "Time Graph of pipeline(update after each stage):" << std::endl;
+    for (size_t i = 1; i <= IF_cnt; i++)
+    {
+        // print sequence num of instruction
+        std::cout.width(4);
+        std::cout << i << " ";
+
+        // print the space before F
+        for (size_t j = 1; j < ins_TG[i][0]; j++)
+        {
+            std::cout << "  ";
+        }
+
+        // print F
+        if (ins_TG[i][0] != 0)
+        {
+            std::cout << "F ";
+        }
+
+        // print D
+        if (ins_TG[i][1] != 0)
+        {
+            std::cout << "D ";
+            if (ins_TG[i][1] > ins_TG[i][0] + 1)
+            {
+                // print -, means bubble
+                for (size_t k = 0; k < ins_TG[i][1] - ins_TG[i][0] - 1; k++)
+                {
+                    std::cout << "- ";
+                }
+            }
+        }
+
+        // print E
+        if (ins_TG[i][2] != 0)
+        {
+            std::cout << "E ";
+            if (ins_TG[i][2] > ins_TG[i][1] + 1)
+            {
+                // print -, means bubble
+                for (size_t k = 0; k < ins_TG[i][2] - ins_TG[i][1] - 1; k++)
+                {
+                    std::cout << "- ";
+                }
+            }
+        }
+
+        // print M
+        if (ins_TG[i][3] != 0)
+        {
+            std::cout << "M ";
+            if (ins_TG[i][3] > ins_TG[i][2] + 1)
+            {
+                // print -, means bubble
+                for (size_t k = 0; k < ins_TG[i][3] - ins_TG[i][2] - 1; k++)
+                {
+                    std::cout << "- ";
+                }
+            }
+        }
+
+        // print W
+        if (ins_TG[i][4] != 0)
+        {
+            std::cout << "W ";
+            if (ins_TG[i][4] > ins_TG[i][3] + 1)
+            {
+                // print -, means bubble
+                for (size_t k = 0; k < ins_TG[i][4] - ins_TG[i][3] - 1; k++)
+                {
+                    std::cout << "- ";
+                }
+            }
+            // print instruction end time
+            std::cout << "(" << ins_TG[i][4] << ")";
+        }
+
+        std::cout << std::endl;
     }
 }
 
@@ -1457,12 +1575,15 @@ int main()
             printTime();
             break;
         case -10:
+            pipelineMode = false;
             runIns();
             break;
         case -11:
+            pipelineMode = true;
             runPipe_ins();
             break;
         case -12:
+            pipelineMode = true;
             runPipe_clk();
             break;
         case 1:
@@ -1481,7 +1602,10 @@ int main()
             printAllInstructions("MIPSInstruction.txt");
             break;
         case 6:
+#ifdef TGDebug
             printPipeTimeGraph();
+#endif
+            printPipeTimeGraphRT();
             break;
         default:
             std::cout << "This cmd is not valid." << std::endl;
