@@ -9,7 +9,7 @@
 #include <algorithm>
 #include <memory.h>
 
-#define TGDebug 1
+//#define TGDebug 1
 
 //1. the 1st step, a Assembler can transfer assembly code to binary machine code, and vice versa.
 /*
@@ -916,7 +916,9 @@ int WB_stage()
     // if not NOP
     if (MEM_WB.IR != Regs[0])
     {
+#ifdef TGDebug
         std::cout << "WB: " << MEM_WB.IR << std::endl;
+#endif
         std::string op = MEM_WB.IR.to_string().substr(0, 6);
 
         // WB do the useful work
@@ -1080,8 +1082,9 @@ int WB_stage()
             else if (ID_waitRegs[ins_start[ins_cnt] + 1] == true)
                 ins_waitType[ins_cnt] = 2;
         }
-
+#ifdef TGDebug
         std::cout << MEM_WB.IR << " is finished." << std::endl;
+#endif
     }
 
     return 0;
@@ -1215,7 +1218,9 @@ bool init(std::string fBinaryCode)
     memset(ins_waitType, 0, 2048 * sizeof(int));
     memset(ins_TG, 0, 2048 * 5 * sizeof(int));
 
-    std::cout << "Initialize successfully" << std::endl;
+    std::cout << "********************************************" << std::endl;
+    std::cout << "***       Initialize Successfully        ***" << std::endl;
+    std::cout << "********************************************" << std::endl;
 
     return true;
 }
@@ -1274,6 +1279,7 @@ void printPipeTimeGraph()
 void printPipeTimeGraphRT()
 {
     std::cout << "Time Graph of pipeline(update after each stage):" << std::endl;
+    std::cout << "(The \"*\" after M or W means this MEM or WB stage does useful work.)" << std::endl;
     for (size_t i = 1; i <= IF_cnt; i++)
     {
         // print sequence num of instruction
@@ -1444,7 +1450,8 @@ void printAllLatch()
     std::cout << "\t\tLMD: " << MEM_WB.LMD << std::endl;
 }
 
-void runIns()
+// unpipelined mode
+void run()
 {
     // run instruction one by one
     int ins_num;
@@ -1466,6 +1473,7 @@ void runIns()
     }
 }
 
+// pipeline instruction mode
 void runPipe_ins()
 {
     // run instruction one by one(pipeline)
@@ -1475,18 +1483,25 @@ void runPipe_ins()
     getchar();           // eat the Enter Key
     for (int i = ins_cnt; ins_cnt < i + ins_num;)
     {
+#ifdef TGDebug
         std::cout << "clk_num:" << clk_cnt + 1 << std::endl;
+#endif
         WB_stage();
         MEM_stage();
         EX_stage();
         ID_stage();
         IF_stage();
+#ifdef TGDebug
         std::cout << "Run " << ins_cnt << "/" << instruction_cnt << " instruction." << std::endl;
+#endif
         // all 5 stages take only one clk cycle
         clk_cnt++;
     }
+    std::cout << "clk_num:" << clk_cnt << std::endl;
+    std::cout << "Run " << ins_cnt << "/" << instruction_cnt << " instruction." << std::endl;
 }
 
+// pipeline-cycle mode
 void runPipe_clk()
 {
     // run instruction in clk(pipeline)
@@ -1496,16 +1511,22 @@ void runPipe_clk()
     getchar();           // eat the Enter Key
     for (size_t i = 0; i < clk_num; i++)
     {
+#ifdef TGDebug
         std::cout << "clk_num:" << clk_cnt + 1 << std::endl;
+#endif
         WB_stage();
         MEM_stage();
         EX_stage();
         ID_stage();
         IF_stage();
+#ifdef TGDebug
         std::cout << "Run " << ins_cnt << "/" << instruction_cnt << " instruction." << std::endl;
+#endif
         // all 5 stages take only one clk cycle
         clk_cnt++;
     }
+    std::cout << "clk_num:" << clk_cnt << std::endl;
+    std::cout << "Run " << ins_cnt << "/" << instruction_cnt << " instruction." << std::endl;
 }
 
 void printTime()
@@ -1557,10 +1578,10 @@ int main()
             // so int can not be 0!!!!
             {"init", -999},
             {"exit", -99},
-            {"uins", -30},
+            {"uup", -30},
             {"upipe", -31},
             {"time", -20},
-            {"rins", -10},
+            {"rup", -10},
             {"rpins", -11},
             {"rpclk", -12},
             {"imem", 1},
@@ -1596,7 +1617,7 @@ int main()
             break;
         case -10:
             pipelineMode = false;
-            runIns();
+            run();
             break;
         case -11:
             pipelineMode = true;
