@@ -334,7 +334,7 @@ std::bitset<8> word2byte(std::bitset<32> word, int i)
 }
 
 // from 2's complement binary code to decimal
-long _2sComplement(std::bitset<32> binary)
+long _2sComplement32(std::bitset<32> binary)
 {
     // 32 bit signed int
     long decimal;
@@ -347,6 +347,25 @@ long _2sComplement(std::bitset<32> binary)
     else
     {
         decimal = binary.to_ulong();
+    }
+    return decimal;
+}
+
+// from 2's complement binary code to decimal
+long _2sComplement16(std::bitset<32> binary)
+{
+    // 32 bit signed int
+    long decimal;
+    std::bitset<16> binary16(binary.to_ulong());
+    if (binary16[15] == 1)
+    {
+        // negtive
+        decimal = binary16.flip().to_ulong() + 1;
+        decimal *= -1;
+    }
+    else
+    {
+        decimal = binary16.to_ulong();
     }
     return decimal;
 }
@@ -687,12 +706,12 @@ int EX_stage()
             if (func == "100000")
             {
                 // add
-                EX_MEM.ALUOutput = _2sComplement(ID_EX.A) + _2sComplement(ID_EX.B);
+                EX_MEM.ALUOutput = _2sComplement32(ID_EX.A) + _2sComplement32(ID_EX.B);
             }
             if (func == "100010")
             {
                 // sub
-                EX_MEM.ALUOutput = _2sComplement(ID_EX.A) - _2sComplement(ID_EX.B);
+                EX_MEM.ALUOutput = _2sComplement32(ID_EX.A) - _2sComplement32(ID_EX.B);
             }
             if (func == "100100")
             {
@@ -707,7 +726,7 @@ int EX_stage()
             if (func == "011000")
             {
                 // mul(t)
-                std::bitset<64> x((long long)_2sComplement(ID_EX.A) * _2sComplement(ID_EX.B));
+                std::bitset<64> x((long long)_2sComplement32(ID_EX.A) * _2sComplement32(ID_EX.B));
                 hi = x.to_ullong() >> 32;
                 lo = x.to_ullong() % 4294967296; //2^32
             }
@@ -716,14 +735,14 @@ int EX_stage()
                 // sll
                 // shamt is unsigned
                 std::bitset<5> shamt(EX_MEM.IR.to_string(), 21, 5);
-                EX_MEM.ALUOutput = _2sComplement(ID_EX.B) << shamt.to_ulong();
+                EX_MEM.ALUOutput = _2sComplement32(ID_EX.B) << shamt.to_ulong();
             }
             if (func == "000010")
             {
                 // srl
                 // shamt is unsigned
                 std::bitset<5> shamt(EX_MEM.IR.to_string(), 21, 5);
-                EX_MEM.ALUOutput = _2sComplement(ID_EX.B) >> shamt.to_ulong();
+                EX_MEM.ALUOutput = _2sComplement32(ID_EX.B) >> shamt.to_ulong();
             }
         }
         /*
@@ -739,28 +758,33 @@ int EX_stage()
         {
             // addi
             // imm is a signed 16-bit int, 2's complement
-            EX_MEM.ALUOutput = _2sComplement(ID_EX.A) + _2sComplement(ID_EX.Imm);
+            // Imm: sign extend
+            EX_MEM.ALUOutput = _2sComplement32(ID_EX.A) + _2sComplement16(ID_EX.Imm);
         }
         if (op == "001100")
         {
             // andi
-            EX_MEM.ALUOutput = _2sComplement(ID_EX.A) & _2sComplement(ID_EX.Imm);
+            // Imm: zero extend
+            EX_MEM.ALUOutput = _2sComplement32(ID_EX.A) & ID_EX.Imm.to_ulong();
         }
         if (op == "001101")
         {
             // ori
-            EX_MEM.ALUOutput = _2sComplement(ID_EX.A) | _2sComplement(ID_EX.Imm);
+            // Imm: zero extend
+            EX_MEM.ALUOutput = _2sComplement32(ID_EX.A) | ID_EX.Imm.to_ulong();
         }
         if (op == "001010")
         {
             // slti
-            EX_MEM.ALUOutput = _2sComplement(ID_EX.A) < _2sComplement(ID_EX.Imm);
+            // Imm: sign extend
+            EX_MEM.ALUOutput = _2sComplement32(ID_EX.A) < _2sComplement16(ID_EX.Imm);
         }
         if (op == "001011")
         {
             // sltiu
             // unsigned long
-            EX_MEM.ALUOutput = _2sComplement(ID_EX.A) < ID_EX.Imm.to_ulong();
+            // Imm: zero extend
+            EX_MEM.ALUOutput = _2sComplement32(ID_EX.A) < ID_EX.Imm.to_ulong();
         }
 
         // //Load or store instruction
@@ -771,14 +795,14 @@ int EX_stage()
         {
             // lw
             // A is unsigned
-            EX_MEM.ALUOutput = ID_EX.A.to_ulong() + _2sComplement(ID_EX.Imm);
+            EX_MEM.ALUOutput = ID_EX.A.to_ulong() + _2sComplement16(ID_EX.Imm);
             EX_MEM.B = ID_EX.B;
         }
         if (op == "101011")
         {
             // sw
             // A is unsigned
-            EX_MEM.ALUOutput = ID_EX.A.to_ulong() + _2sComplement(ID_EX.Imm);
+            EX_MEM.ALUOutput = ID_EX.A.to_ulong() + _2sComplement16(ID_EX.Imm);
             EX_MEM.B = ID_EX.B;
         }
         if (op == "001111")
@@ -794,7 +818,7 @@ int EX_stage()
         {
             // beq
             // if rs==rt, then pc=pc+imm<<2
-            EX_MEM.ALUOutput = ID_EX.NPC + (_2sComplement(ID_EX.Imm) << 2);
+            EX_MEM.ALUOutput = ID_EX.NPC + (_2sComplement16(ID_EX.Imm) << 2);
             EX_MEM.cond = (ID_EX.A == ID_EX.B);
 
             // the next PC is ready
